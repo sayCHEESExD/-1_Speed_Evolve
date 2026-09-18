@@ -231,7 +231,13 @@ export class BloxityAvatar {
 
       const texture = await this.textureLoader.loadAsync(assetUrl(texturePath));
       texture.colorSpace = SRGBColorSpace;
-      texture.flipY = false;
+      // flipY stays at three's default (true), and that is the whole fix for
+      // hats and back items that drew as scrambled camouflage. These are OBJ
+      // meshes, whose UVs put the origin at the BOTTOM-left - the convention
+      // the default flip is for. `flipY = false` belongs to the SKIN, which
+      // sits on the glTF body where the origin is at the top. Bloxity's own
+      // renderer draws them exactly this way: skins unflipped, items at the
+      // default. Unflipped, every item sampled its atlas upside-down.
       texture.magFilter = NearestFilter;
       texture.minFilter = NearestFilter;
       texture.generateMipmaps = false;

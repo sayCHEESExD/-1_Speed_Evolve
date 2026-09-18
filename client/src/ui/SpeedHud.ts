@@ -140,8 +140,10 @@ const injectStyles = (): void => {
   style.textContent = `
 .aoe-hud {
   position: fixed;
+  /* BOTTOM-CENTRE, and never closer to the edge than 20px (or the device's own
+   * safe area, where it has one). */
   left: 50%;
-  bottom: 3.5vh;
+  bottom: max(20px, 3.5vh, calc(env(safe-area-inset-bottom, 0px) + 12px));
   transform: translateX(-50%);
   width: min(720px, 74vw);
   pointer-events: none;
@@ -319,12 +321,19 @@ body.aoe-touch-mode .aoe-hud {
  */
 @media (orientation: landscape) and (max-height: 500px) {
   body.aoe-touch-mode .aoe-hud {
-    bottom: max(6px, env(safe-area-inset-bottom, 0px));
+    /* Clearly above the bottom edge, and above the home indicator. */
+    bottom: max(12px, calc(env(safe-area-inset-bottom, 0px) + 6px));
+    /* The channel between the stick and the jump button, measured from the
+     * stick's own radius formula - 2 x clamp(46px, 15vmin, 84px) wide, 26px
+     * off the edge - plus a margin, on both sides so the bar stays centred. */
     width: max(
-      220px,
+      200px,
       min(
         440px,
-        calc(100vw - 2 * (44px + 30vmin) - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px))
+        calc(
+          100vw - 2 * (44px + 2 * clamp(46px, 15vmin, 84px))
+            - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)
+        )
       )
     );
   }

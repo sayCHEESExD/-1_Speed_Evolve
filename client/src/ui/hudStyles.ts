@@ -19,6 +19,14 @@ export const injectHudStyles = (): void => {
   /* ONE number scales the whole left rail, so the column grows together. */
   --aoe-rail: 78px;
   --aoe-ink: #12181f;
+  /*
+   * Where the resting movement stick's TOP edge is, measured up from the
+   * bottom of the screen. The same formula \`TouchControls\` sizes the stick
+   * with - radius clamp(46px, 15vmin, 84px), resting 26px off the corner - so
+   * the rail can centre itself in the space above it on a phone and the two
+   * cannot drift apart. Zero wherever there is no stick.
+   */
+  --aoe-stick-top: 0px;
 }
 
 .aoe-font {
@@ -94,18 +102,27 @@ export const injectHudStyles = (): void => {
 }
 
 /* ---- Left rail -----------------------------------------------------------
- * TWO COLUMNS anchored to the top left, as the reference art arranges it, with
- * the lifetime tallies as a final row under them. A single centred column was
- * a perfectly reasonable thing to build and is not what this game looks like.
+ * TWO COLUMNS at the LEFT-CENTRE of the screen, with the lifetime tallies as a
+ * final row under them. The same grid on a PC and a phone on its side; only
+ * the tile size changes.
  *
- * Inside the Bloxity portal the top-left corner belongs to the portal's own
+ * Inside the Bloxity portal the top of the page belongs to the portal's own
  * logo and menu, drawn over our page from the parent frame - so the rail
- * starts below whatever height it declares.
+ * centres in the height BELOW whatever it declares. On a touch screen it
+ * centres in the height ABOVE the resting movement stick.
  */
 .aoe-rail {
   position: fixed;
-  left: max(12px, env(safe-area-inset-left, 0px));
-  top: calc(max(14px, env(safe-area-inset-top, 0px)) + var(--aoe-portal-top, 0px));
+  /*
+   * LEFT-CENTRE: against the left edge, vertically centred in the screen's
+   * free height - below whatever the Bloxity portal draws over the top, and
+   * above the movement stick on a touch screen. One rule for every shape; the
+   * two variables are zero wherever there is nothing to clear.
+   */
+  left: max(16px, env(safe-area-inset-left, 0px));
+  top: calc((100vh + var(--aoe-portal-top, 0px) - var(--aoe-stick-top)) / 2);
+  top: calc((100dvh + var(--aoe-portal-top, 0px) - var(--aoe-stick-top)) / 2);
+  transform: translateY(-50%);
   display: grid;
   grid-template-columns: repeat(2, var(--aoe-rail));
   gap: 16px 12px;
@@ -965,20 +982,19 @@ body.aoe-touch-mode .aoe-rail { --aoe-rail: 62px; }
   .aoe-panel__close { width: 28px; height: 28px; font-size: 14px; border-radius: 9px; }
   .aoe-panel__body { padding: 10px 12px 12px; }
 
-  /* The rail becomes a ROW across the top-left. A column, however small its
-   * tiles, still runs down the left edge toward the stick on a screen this
-   * short; a row is one tile tall and cannot reach it at any height.
-   * Inside the Bloxity portal the portal draws its own logo and menu pill
-   * over that same corner - on top of our page, where nothing in it can be
-   * measured or clicked through - so the row drops below it there. */
-  body.aoe-touch-mode .aoe-rail {
-    --aoe-rail: clamp(40px, 12.5vh, 52px);
-    flex-direction: row;
-    top: calc(max(8px, env(safe-area-inset-top, 0px)) + var(--aoe-portal-top, 0px));
-    left: max(10px, env(safe-area-inset-left, 0px));
-    transform: none;
-    gap: 12px;
+  /* The SAME left-centre grid as on a PC, with smaller tiles, centred in the
+   * band between the top of the screen (or the portal's bar) and the top of
+   * the resting movement stick - so it sits at the left-centre of the space a
+   * thumb is not using, and cannot reach the stick at any height. */
+  body.aoe-touch-mode {
+    --aoe-stick-top: calc(26px + 2 * clamp(46px, 15vmin, 84px) + env(safe-area-inset-bottom, 0px));
   }
+  body.aoe-touch-mode .aoe-rail {
+    --aoe-rail: clamp(36px, 11vh, 50px);
+    left: max(12px, env(safe-area-inset-left, 0px));
+    gap: 10px 8px;
+  }
+  body.aoe-touch-mode .aoe-wins { margin-top: 2px; gap: 2px; }
   body.aoe-touch-mode .aoe-tile { border-width: 3px; border-radius: 13px; }
   body.aoe-touch-mode .aoe-tile__label { font-size: 10px; bottom: -7px; }
   body.aoe-touch-mode .aoe-tile__badge {
@@ -991,10 +1007,6 @@ body.aoe-touch-mode .aoe-rail { --aoe-rail: 62px; }
     line-height: 14px;
   }
   body.aoe-touch-mode .aoe-account__name { max-width: 22vw; }
-  /* The FPS readout shared the rail's corner; it moves under the row. */
-  body.aoe-touch-mode .aoe-fps {
-    top: calc(max(8px, env(safe-area-inset-top, 0px)) + var(--aoe-portal-top, 0px) + 66px);
-  }
 }
 
 

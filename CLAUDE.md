@@ -884,11 +884,22 @@ their browser. Nothing on Legion resets progress any more.
 ## UI
 
 The HUD is: **Evolve**, **Rebirth**, **Shop** and **Sound** as a TWO-COLUMN
-grid at the top left, the **Wins** and **rebirth** tallies as the grid's last
-row, **Total Multiplier** and **Speed** along the bottom over the level bar,
-and a small **nameplate** over every rider's head. That is the reference art's
-arrangement, and the tallies live INSIDE the rail's own grid so they sit under
-the tiles whatever the tile count is.
+grid at the LEFT-CENTRE of the screen, the **Wins** and **rebirth** tallies as
+the grid's last row, **Total Multiplier** and **Speed** at the BOTTOM-CENTRE
+over the level bar, and a small **nameplate** over every rider's head. The
+tallies live INSIDE the rail's own grid so they sit under the tiles whatever
+the tile count is.
+
+- **ONE layout for a PC and a phone on its side.** The rail is centred in the
+  screen's FREE height: below whatever the Bloxity portal draws over the top
+  (`--aoe-portal-top`) and above the resting movement stick
+  (`--aoe-stick-top`, computed from the stick's OWN radius formula,
+  `clamp(46px, 15vmin, 84px)`). Both are zero where there is nothing to clear,
+  so on a PC it is exactly centred and on a phone it sits in the band a thumb
+  is not using. Only the tile size changes between the two.
+- The level bar is centred, never closer than 20px to the bottom on a PC or
+  12px on a phone, and on a phone its width is the channel BETWEEN the stick
+  and the jump button, measured from the same radius formula.
 
 - Every panel is the reference art's plate: a dark green box behind a heavy
   black frame, with a header of ICON, TITLE, a rule that takes up the slack and
@@ -942,8 +953,9 @@ the tiles whatever the tile count is.
   because a phone has no E key and a duplicate on-screen control would be a
   second thing to keep in step with the same proximity test.
 - **A phone on its side** is `(orientation: landscape) and (max-height: 500px)`,
-  and every rule for it is scoped to that query. The rail becomes a ROW across
-  the top-left so it cannot reach the movement stick at any height.
+  and every rule for it is scoped to that query. The rail keeps the PC's
+  left-centre grid with smaller tiles; `--aoe-stick-top` is what keeps it off
+  the movement stick at any height.
 - The bottom HUD is lifted by the STICK'S OWN size (`30vmin + 34px`) rather
   than a constant. A constant is a number that happens to work on one phone.
 - **Inside the Bloxity portal the top-left corner is not ours.**
