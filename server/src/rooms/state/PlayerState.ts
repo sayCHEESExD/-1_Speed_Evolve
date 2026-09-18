@@ -170,12 +170,6 @@ export class PlayerState extends Schema {
   @type('float32') moveMultiplier = 1;
   @type('float32') jumpVelocity = 25;
 
-  /**
-   * Level cap for the current rebirth. `uint32`, for the same reason as
-   * `rebirths`.
-   */
-  @type('uint32') maxLevel = 25;
-
   /** Highest stage (1-based) ever banked. 0 before the first finish. */
   @type('uint32') bestStage = 0;
 

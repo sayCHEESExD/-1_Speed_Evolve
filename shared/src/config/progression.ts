@@ -1,13 +1,13 @@
-import { maxLevelForRebirth, nextRebirthTier, rebirthMultiplier } from './rebirth.js';
+import { rebirthMultiplier } from './rebirth.js';
 
 /**
  * Progression tuning. Level, Speed, Wins, rebirths, the equipped upgrade pad,
  * the mount and the two cosmetic ladders are all SERVER-AUTHORITATIVE; the
  * client may predict for UI feel but never decides any of them.
  *
- * The level cap is NOT a constant here - it is whatever the next rebirth
- * requires, so reaching the cap and unlocking a rebirth are the same moment.
- * See `config/rebirth.ts`.
+ * There is NO level cap. Levels run on one compounding curve for ever, and a
+ * rebirth is unlocked by REACHING a level rather than by being stopped at it.
+ * See `config/speed.ts` and `config/rebirth.ts`.
  */
 
 /**
@@ -24,28 +24,18 @@ import { maxLevelForRebirth, nextRebirthTier, rebirthMultiplier } from './rebirt
 export const MAX_WINS = Number.MAX_SAFE_INTEGER;
 
 /**
- * The largest lifetime Speed the game will hold, for the same reason.
+ * The largest lifetime Speed the game will hold: the largest number a float64
+ * can hold at all, about 1.8e308.
  *
- * Speed climbs faster than Wins do - a +2K pad under a 400x trail and a 300x
- * aura is 240 million a step - so this ceiling is the one that actually gets
- * approached. It is also where the level curve stops: `speedForNextLevel`
- * compounds, so it would run past a float64 eventually, and it saturates here
- * instead. A requirement that silently stopped increasing is survivable; one
- * that silently went backwards is not.
+ * This is NOT a level cap - the curve runs on past it, it is simply where the
+ * arithmetic ends (around level twelve thousand). It exists so a total that
+ * overflows SATURATES rather than turning into `Infinity`, which the clamp
+ * below would otherwise read as garbage and reset to zero.
  */
-export const MAX_TOTAL_SPEED = Number.MAX_SAFE_INTEGER;
+export const MAX_TOTAL_SPEED = Number.MAX_VALUE;
 
-/** Level cap before any rebirth. Derived, so the two can never disagree. */
-export const BASE_LEVEL_CAP = nextRebirthTier(0).requiredLevel;
-
-/**
- * Re-exported under the names the rest of the codebase already uses.
- *
- * The rebirth module owns the ladder; these exist so a caller needs one import
- * for "what is this player's cap" rather than knowing which file the ladder
- * happens to live in.
- */
-export { maxLevelForRebirth, rebirthMultiplier };
+/** Re-exported under the name the rest of the codebase already uses. */
+export { rebirthMultiplier };
 
 /** Clamp a Wins figure into the range the game can actually hold. */
 export const clampWins = (value: number): number => {
@@ -55,6 +45,6 @@ export const clampWins = (value: number): number => {
 
 /** Clamp a lifetime Speed figure into the range the game can actually hold. */
 export const clampSpeed = (value: number): number => {
-  if (!Number.isFinite(value) || value <= 0) return 0;
+  if (Number.isNaN(value) || value <= 0) return 0;
   return Math.min(value, MAX_TOTAL_SPEED);
 };

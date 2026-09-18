@@ -67,19 +67,18 @@ export class SpeedHud {
 
   /**
    * @param totalSpeed lifetime Speed farmed, replicated from the server
-   * @param levelCap   highest reachable level for this player
    * @param multiplier the replicated product of every multiplier the player has
    */
-  update(totalSpeed: number, levelCap: number, multiplier: number): void {
+  update(totalSpeed: number, multiplier: number): void {
     if (totalSpeed !== this.lastTotal) {
       this.lastTotal = totalSpeed;
       // Two decimal places, as the art shows it - "Speed: 76.00" is a literal
       // total rather than an abbreviation until the digits stop fitting.
       this.speedLabel.textContent = `Speed: ${formatSpeedExact(totalSpeed)}`;
-      this.renderBar(resolveLevel(totalSpeed, levelCap));
+      this.renderBar(resolveLevel(totalSpeed));
     }
 
-    const level = resolveLevel(totalSpeed, levelCap).level;
+    const level = resolveLevel(totalSpeed).level;
     if (level !== this.lastLevel) {
       this.lastLevel = level;
       this.levelLabel.textContent = `Level ${level}`;
@@ -114,9 +113,7 @@ export class SpeedHud {
      * than as a fraction of one.
      */
     const show = progress.required < COMPACT_ABOVE ? formatSpeedExact : formatSpeed;
-    this.amountLabel.textContent = progress.capped
-      ? 'MAX LEVEL'
-      : `${show(progress.into)}/${show(progress.required)}`;
+    this.amountLabel.textContent = `${show(progress.into)}/${show(progress.required)}`;
   }
 }
 

@@ -2,8 +2,8 @@
  * Rebirth: the prestige ladder.
  *
  * Ported from the previous game's rebirth system and kept behaviourally
- * identical - a rebirth trades the current level curve for a permanently higher
- * ceiling and a bigger multiplier, and deliberately leaves everything the
+ * identical - a rebirth trades the current level curve for a bigger multiplier,
+ * and deliberately leaves everything the
  * player earned OUTSIDE that curve alone. Wins and owned animals are permanent
  * unlocks and survive a rebirth untouched.
  *
@@ -41,16 +41,6 @@ const EXTENSION = {
   multiplierPerRebirth: 1,
 } as const;
 
-/**
- * The largest level and rebirth count that can be replicated.
- *
- * `PlayerState.level`, `maxLevel` and `rebirths` are all `uint32`, so a figure
- * past this WRAPS on the wire - and a wrapped level cap is worse than a cap,
- * because it silently drops a player's ceiling to nothing. Clamping saturates
- * instead.
- */
-export const MAX_REPLICATED_LEVEL = 4294967295;
-
 /** The rung a player with `count` rebirths is working toward. */
 export const nextRebirthTier = (count: number): RebirthTier => {
   const done = Math.max(0, Math.floor(count));
@@ -67,16 +57,6 @@ export const nextRebirthTier = (count: number): RebirthTier => {
   };
 };
 
-/**
- * Highest level reachable at this rebirth count.
- *
- * It is exactly the level the NEXT rebirth needs, which is what makes reaching
- * the cap and unlocking the rebirth the same moment - the cap is a gate, never
- * a dead end.
- */
-export const maxLevelForRebirth = (count: number): number =>
-  Math.min(nextRebirthTier(count).requiredLevel, MAX_REPLICATED_LEVEL);
-
 /** Speed multiplier granted by `count` completed rebirths. */
 export const rebirthMultiplier = (count: number): number => {
   const done = Math.max(0, Math.floor(count));
@@ -88,6 +68,12 @@ export const rebirthMultiplier = (count: number): number => {
   return last.multiplier + beyond * EXTENSION.multiplierPerRebirth;
 };
 
-/** A player may rebirth once they have reached their current max level. */
+/**
+ * A player may rebirth once they have REACHED the next rung's level.
+ *
+ * Reaching it is a door, not a wall: there is no level cap, so a player who
+ * would rather keep climbing than reset may ride on past it for as long as
+ * they like, and the rebirth waits for them.
+ */
 export const canRebirth = (level: number, count: number): boolean =>
-  Math.floor(level) >= maxLevelForRebirth(count);
+  Math.floor(level) >= nextRebirthTier(count).requiredLevel;

@@ -173,10 +173,10 @@ interface StageTuning {
   /**
    * Level the stage is built around.
    *
-   * The ladder respects the rebirth cap of 25 levels per rebirth: stage 5 at
-   * 15 is inside a first run, stage 10 at 47 wants two, and stage 30 at 160
-   * wants six - a real ask for a final expedition, and one the ladder actually
-   * reaches.
+   * Levels are uncapped, so any of these can be reached without a rebirth -
+   * but the curve compounds, and rebirthing on the way is what makes the top
+   * of the ladder a reasonable ride: stage 5 at 15 is inside a first run and
+   * stage 30 at 160 is a real ask for a final expedition.
    */
   readonly recommendedLevel: number;
 }

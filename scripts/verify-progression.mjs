@@ -32,7 +32,6 @@ import {
   highestEarnedMount,
   isMountUnlocked,
   ITEM_TIERS,
-  MAX_CURVE_LEVEL,
   MAX_WINS,
   mountForSlot,
   MOUNTS,
@@ -45,6 +44,7 @@ import {
   sanitizeDisplayName,
   sanitizePfpUrl,
   SPEED,
+  clampSpeed,
   SPEED_UPGRADES,
   speedForNextLevel,
   speedPerStep,
@@ -504,15 +504,13 @@ console.log('rebirth');
   const upgrades = new UpgradeService();
   const rebirths = new RebirthService();
   const player = newPlayer(speeds, upgrades);
-  rebirths.sync(player);
 
   check('rebirth 1 needs level 25', nextRebirthTier(0).requiredLevel, 25);
   check('rebirth 2 needs level 50', nextRebirthTier(1).requiredLevel, 50);
-  check('level cap is the next rebirth requirement', player.maxLevel, 25);
   check('a level-1 player may not rebirth', rebirths.isEligible(player), false);
   check('  and the request is refused', rebirths.rebirth(player, speeds).ok, false);
 
-  // Earn the cap. Everything outside the level curve must survive.
+  // Earn the rebirth. Everything outside the level curve must survive.
   player.wins = 137;
   player.unlockedMounts = 0b111;
   player.ownedTrails = 0b11;
@@ -520,9 +518,14 @@ console.log('rebirth');
   player.ownedAuras = 0b1;
   player.auraSlot = 1;
   player.upgradeSlot = 5;
+  player.totalSpeed = totalSpeedToReach(24);
+  speeds.syncDerived(player);
+  check('level 24 is not enough', rebirths.isEligible(player), false);
   player.totalSpeed = 1e9;
   speeds.syncDerived(player);
-  check('capped at level 25', player.level, 25);
+  // NO CAP: a billion Speed is well past level 25, and the level says so.
+  check('the level is not capped at the requirement', player.level > 25, true);
+  check('  and the level is the curve\'s own', player.level, resolveLevel(1e9).level);
   check('now eligible', rebirths.isEligible(player), true);
 
   const done = rebirths.rebirth(player, speeds);
@@ -530,7 +533,7 @@ console.log('rebirth');
   check('  level reset to 1', player.level, 1);
   check('  Speed reset to 0', player.totalSpeed, 0);
   check('  rebirth count is 1', player.rebirths, 1);
-  check('  cap raised to 50', player.maxLevel, 50);
+  check('  the next rebirth needs level 50', rebirths.requiredLevel(player), 50);
   check('  the gain multiplier includes x2', done.multiplier, 2);
   check('  Wins survived', player.wins, 137);
   check('  mounts survived', player.unlockedMounts, 0b111);
@@ -819,12 +822,30 @@ console.log('speed and levels');
     check('every level boundary resolves to that exact level, 1-250', mismatches, 0);
   }
 
-  // And the curve stays inside a float64 for every level the rebirth ladder
-  // could ever gate. "Demanding" and "impossible" are different things.
+  // NO LEVEL CAP, and no saturation: every level costs 1.06x the one before
+  // it for as long as a float64 can count, and the level keeps rising with
+  // Speed all the way there.
   {
-    const top = totalSpeedToReach(MAX_CURVE_LEVEL);
-    check('the curve never overflows', Number.isFinite(top), true);
-    check(`  and expresses ${MAX_CURVE_LEVEL} levels before it saturates`, MAX_CURVE_LEVEL > 400, true);
+    let steady = true;
+    let lastLevel = 0;
+    for (let level = 10; level <= 12000; level += 1) {
+      const reach = totalSpeedToReach(level);
+      if (!Number.isFinite(reach)) break;
+      const here = speedForNextLevel(level);
+      const next = speedForNextLevel(level + 1);
+      if (level > 200 && Number.isFinite(next)) {
+        const expected = (SPEED.levelGrowth * (level + 1)) / level;
+        if (Math.abs(next / here / expected - 1) > 1e-6) steady = false;
+      }
+      if (resolveLevel(reach).level !== level) steady = false;
+      lastLevel = level;
+    }
+    check('the curve compounds at the same rate past level 460', steady, true);
+    check(`  and runs to level ${lastLevel} before a float64 runs out`, lastLevel > 10000, true);
+    check('  a level past level 1000 resolves', resolveLevel(totalSpeedToReach(1000)).level, 1000);
+    check('  an overflowing total saturates rather than resetting', clampSpeed(Infinity) > 0, true);
+    check('  and never resolves above the last finite level', resolveLevel(Number.MAX_VALUE).level, lastLevel);
+    check('  nor produces a NaN bar', Number.isFinite(resolveLevel(Number.MAX_VALUE).fraction), true);
   }
 
   // Credit honest movement: sixty 1/60-second steps at a plausible run.
@@ -852,19 +873,18 @@ console.log('speed and levels');
   speeds.credit('test', player, 1 / 60);
   check('a teleport pays nothing', player.totalSpeed, beforeTeleport);
 
-  // Movement speed rises with LEVEL and with nothing else. The cap before any
-  // rebirth is level 25, so that is where a huge Speed total lands - getting
-  // past it is what the rebirth ladder is FOR.
+  // Movement speed rises with LEVEL and with nothing else. There is no level
+  // cap, so a huge Speed total lands wherever the curve puts it.
   player.totalSpeed = 1e9;
   speeds.syncDerived(player);
-  check('a huge Speed total caps at the pre-rebirth level', player.level, 25);
+  check('a huge Speed total is not capped', player.level, resolveLevel(1e9).level);
 
   const atLevel1 = resolveMovementProfile(1).multiplier;
-  const atCap = resolveMovementProfile(25).multiplier;
-  const higher = resolveMovementProfile(160).multiplier;
+  const atLevel = resolveMovementProfile(player.level).multiplier;
+  const higher = resolveMovementProfile(player.level + 100).multiplier;
   check('level drives the replicated multiplier', player.moveMultiplier > atLevel1, true);
-  check('  and it is the level cap that is driving it', player.moveMultiplier, atCap);
-  check('  and a higher level is still faster', higher > atCap, true);
+  check('  and it is the level that is driving it', player.moveMultiplier, atLevel);
+  check('  and a higher level is still faster', higher > atLevel, true);
   check('  level 1 is exactly the base speed', atLevel1, 1);
 
   // The thing that must NOT be true: a cosmetic must not make the player
@@ -877,9 +897,9 @@ console.log('speed and levels');
   player.auraSlot = 11; // Rainbow, x300
   player.rebirths = 9;
   speeds.syncDerived(player);
-  check('a 400x trail does not change movement speed', player.moveMultiplier > before, true);
-  // (It rose only because the rebirth raised the level CAP, which raised the
-  // level. Pinning the level proves the cosmetics contribute nothing.)
+  check('a 400x trail does not change movement speed', player.moveMultiplier, before);
+  // Nor do nine rebirths: with no level cap to raise, the level - and so the
+  // movement - is exactly where the Speed total already put it.
   const pinned = resolveMovementProfile(player.level).multiplier;
   check('  movement is a pure function of level', player.moveMultiplier, pinned);
   check('  but the gain multiplier is enormous', player.totalMultiplier > 1e6, true);
@@ -1079,7 +1099,7 @@ console.log('deterministic Speed gain');
     check(
       '  and the level is read off that accumulated total',
       player.level,
-      resolveLevel(player.totalSpeed, player.maxLevel).level,
+      resolveLevel(player.totalSpeed).level,
     );
   }
 
@@ -1234,6 +1254,23 @@ console.log('deterministic Speed gain');
   check('  2.5 as 2.5', formatSpeedGain(2.5), '2.5');
   check('  1,300 compactly', formatSpeedGain(1300), '1.3K');
   check('  and float dust never shows', formatSpeedGain(1.04 * 1.5 * 1.25), '1.95');
+  // Levels are uncapped, so the compact form must name every thousand up to
+  // the end of float64 rather than running out of suffixes.
+  check('1e18 is a quintillion', formatSpeed(1e18), '1Qi');
+  check('  1e33 a decillion', formatSpeed(1e33), '1Dc');
+  check('  1e36 an undecillion', formatSpeed(1e36), '1UDc');
+  check('  1e63 a vigintillion', formatSpeed(1e63), '1Vg');
+  check('  1e303 a centillion', formatSpeed(1e303), '1Ce');
+  check('  and the largest float64 still has a suffix', formatSpeed(Number.MAX_VALUE), '179.8UCe');
+  check('  999,960 rounds up a rung rather than to "1000K"', formatSpeed(999960), '1M');
+  {
+    let clean = true;
+    for (let e = 3; e <= 308; e += 1) {
+      const text = formatSpeed(Number(`1e${e}`));
+      if (!/^\d{1,3}(\.\d)?[A-Za-z]+$/.test(text)) clean = false;
+    }
+    check('  every power of ten prints as digits and a suffix', clean, true);
+  }
 }
 
 console.log('');

@@ -1,8 +1,4 @@
-import {
-  maxLevelForRebirth,
-  nextRebirthTier,
-  rebirthMultiplier,
-} from '@evolve/shared';
+import { nextRebirthTier, rebirthMultiplier } from '@evolve/shared';
 import { ICONS } from './hudStyles.js';
 import { Panel } from './Panel.js';
 
@@ -128,17 +124,18 @@ export class RebirthPanel extends Panel {
   private render(): void {
     const tier = nextRebirthTier(this.rebirths);
     const eligible = this.isEligible;
-    const cap = maxLevelForRebirth(this.rebirths);
 
     // "Speed: x2", matching the reference art's wording exactly - the colon is
     // what makes the card read as a reading rather than as a product name.
     this.beforeSpeed.textContent = `Speed: x${rebirthMultiplier(this.rebirths)}`;
     this.afterSpeed.textContent = `Speed: x${tier.multiplier}`;
-    this.beforeLevel.textContent = `Max Level ${cap}`;
-    this.afterLevel.textContent = `Max Level ${maxLevelForRebirth(this.rebirths + 1)}`;
+    // There is no level cap to raise, so the level row shows what a rebirth
+    // actually trades: the level the player is at now, for level 1.
+    this.beforeLevel.textContent = `Level ${this.level}`;
+    this.afterLevel.textContent = 'Level 1';
 
-    const shown = Math.min(this.level, cap);
-    this.barFill.style.width = `${Math.min(Math.max(shown / cap, 0), 1) * 100}%`;
+    const shown = Math.min(this.level, tier.requiredLevel);
+    this.barFill.style.width = `${Math.min(Math.max(shown / tier.requiredLevel, 0), 1) * 100}%`;
     this.barLabel.textContent = `Level ${shown}/${tier.requiredLevel}`;
 
     this.action.disabled = !eligible;

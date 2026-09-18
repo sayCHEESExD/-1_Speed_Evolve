@@ -150,17 +150,26 @@ on purpose. `verify:progression` asserts both halves of this.
   while level 25 costs only twice what it used to, which is the shape the
   grind is supposed to have.
 - **1.06 is the one number to retune**, and both directions are failure modes.
-  Much lower is the flat grind it replaced; much higher outruns a float64
-  before the rebirth ladder runs out of rungs, which is the "impossible" end of
-  the scale rather than the demanding one. At 1.06 the requirement saturates
-  past level 460 - far beyond the eighteen rebirths it would take to be allowed
-  there. `verify:progression` prints the cost of levels 10 through 200 against
-  the curve it replaced, and that table is the thing to read when changing it.
+  Much lower is the flat grind it replaced; much higher makes each level a
+  wall rather than a step and reaches the end of float64 far sooner, which is
+  the "impossible" end of the scale rather than the demanding one.
+  `verify:progression` prints the cost of levels 10 through 200 against the
+  curve it replaced, and that table is the thing to read when changing it.
+- **THERE IS NO LEVEL CAP, and the curve never saturates.** Every level costs
+  1.06 times the one before it, for ever. The curve used to be clamped at
+  `MAX_SAFE_INTEGER`, which froze it at level 460, and the level was also
+  capped at the next rebirth's requirement; both are gone. The only end is
+  arithmetic: the running total passes `Number.MAX_VALUE` (~1e308) around
+  level 11,950. `clampSpeed` SATURATES there rather than overflowing, because
+  an `Infinity` total would otherwise read as invalid and reset to zero.
+  Levels past ~800 cost over 1e20 each, so an award is a vanishing fraction of
+  the total long before that end - precision thins out, the curve does not.
 - `totalSpeedToReach` is a **TABLE**, not a formula, and it has to be: the
   per-level cost is rounded, so the running total is a sum of rounded terms.
   Building the table out of `speedForNextLevel` is also what guarantees the two
   can never disagree - a full bar that does not level anybody up is exactly the
-  bug a second formula produces.
+  bug a second formula produces. With no cap it has no fixed length: it GROWS
+  on demand, a row at a time, as far as somebody's Speed actually reaches.
 - `resolveLevel` **binary-searches that table**. The linear curve inverted to a
   quadratic so the level was one square root; a compounding curve has no such
   inverse, and counting levels in a loop would be hundreds of iterations on a
@@ -169,9 +178,10 @@ on purpose. `verify:progression` asserts both halves of this.
   curve reaches returning players rather than only new ones. Retuning it moves
   everybody's level the next time they join - that is correct, and it is worth
   knowing before you touch 1.06.
-- The level CAP is not a constant: it is whatever the next rebirth requires,
-  so reaching the cap and unlocking a rebirth are the same moment. A cap is a
-  gate, never a dead end.
+- Reaching the next rebirth's level UNLOCKS it and stops nothing: a player
+  may keep levelling past it for as long as they like, and the rebirth waits.
+  There is no `maxLevel` on the wire any more. The rebirth panel shows what a
+  rebirth trades - the current level for level 1 - rather than a cap to raise.
 - `REBIRTH_TIERS` is the authored head (level 25 → x2, level 50 → x3) and
   `EXTENSION` continues the same pattern for ever.
 - A rebirth resets the level curve - which means clearing `totalSpeed`,
@@ -918,7 +928,9 @@ the tile count is.
   that preceded the blue changed colour as it grew, which made one level look
   like a different state at 40% and at 90%.
 - **Large figures are COMPACT, and `formatSpeed` is the only place that
-  decides so**: 1K, 2.5K, 100K, 1M, 1B, 1T, and never a trailing `.0`. Speed,
+  decides so**: 1K, 2.5K, 100K, 1M, 1B, 1T, and never a trailing `.0`.
+  Levels are uncapped, so the suffixes are GENERATED - the short-scale names
+  Qa, Qi, Sx ... Dc, UDc ... Vg ... Ce, UCe - all the way to float64's end. Speed,
   Wins, shop prices, pad rates, popups and the leaderboards all go through it,
   so the game cannot abbreviate in two styles depending on where you look. The
   one exception is the HEADLINE reading and the level bar, which print the

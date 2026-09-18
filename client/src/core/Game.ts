@@ -796,7 +796,7 @@ ${identity.pfp}`;
     // The multiplier is REPLICATED, not recomputed: it is the product of five
     // separate ladders, and a HUD that assembled its own copy would be a
     // second place for one of them to be applied twice.
-    this.hud.update(state.totalSpeed, state.maxLevel, state.totalMultiplier);
+    this.hud.update(state.totalSpeed, state.totalMultiplier);
     this.wins.update(state.wins, state.rebirths);
     this.run.setInventory(state.wins, state.upgradeSlot);
 

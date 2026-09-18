@@ -374,7 +374,6 @@ export class CourseRoom extends Room<CourseState> {
     // is judged against. Refreshing first would judge every returning player
     // at level 1 and hand them back their starter cockroach.
     this.evolve.refresh(player);
-    this.rebirths.sync(player);
     // Re-derived from the Speed the profile came back with, and the mount
     // re-checked against the level that produces.
     this.speeds.syncDerived(player);
@@ -1145,7 +1144,6 @@ const resetProgression = (player: PlayerState): void => {
   player.upgradeSlot = fresh.upgradeSlot;
   player.bestStage = fresh.bestStage;
   player.level = fresh.level;
-  player.maxLevel = fresh.maxLevel;
 };
 
 /**

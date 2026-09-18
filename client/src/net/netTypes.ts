@@ -29,7 +29,6 @@ export interface NetPlayerState extends PlayerMotionState {
   totalMultiplier: number;
   moveMultiplier: number;
   jumpVelocity: number;
-  maxLevel: number;
   bestStage: number;
 
   /** Authoritative velocity, used to reconcile client prediction. */

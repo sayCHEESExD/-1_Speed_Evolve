@@ -3,7 +3,6 @@ import { mountMultiplier } from './mounts.js';
 import { rebirthMultiplier } from './rebirth.js';
 import { trailMultiplier } from './trails.js';
 import { treadmillMultiplier } from './treadmills.js';
-import { MAX_TOTAL_SPEED } from './progression.js';
 import { upgradePerStep } from './upgrades.js';
 
 /**
@@ -108,54 +107,60 @@ export const speedForNextLevel = (level: number): number => {
   const from = Math.max(1, Math.floor(level));
   const linear = SPEED.levelStep * from;
   const beyond = Math.max(0, from - SPEED.levelKnee);
-  const cost = linear * SPEED.levelGrowth ** beyond;
-  // Saturates rather than overflowing. Past this the figure stops being a
-  // number a float64 can add one to, and a requirement that silently stops
-  // increasing is better than one that silently goes backwards.
-  return Math.min(MAX_TOTAL_SPEED, Math.round(cost));
+  // No ceiling: every level costs 1.06 times the one before it, for ever.
+  // Past 2^53 the rounding is a no-op, and the ratio between neighbours is
+  // what a player feels, so the curve keeps its shape all the way up.
+  return Math.round(linear * SPEED.levelGrowth ** beyond);
 };
 
 /**
- * The cumulative cost of every level, built once.
+ * The cumulative cost of every level, grown on demand.
  *
  * A TABLE rather than a closed form, and it has to be: the per-level cost is
  * rounded, so the running total is a sum of rounded terms and no formula
- * reproduces it. Building it once is also what guarantees that
- * `totalSpeedToReach` and `speedForNextLevel` can never disagree - the table
- * is made OF the latter.
+ * reproduces it. Building it OUT OF `speedForNextLevel` is also what
+ * guarantees that `totalSpeedToReach` and the bar can never disagree.
  *
  * `CUMULATIVE[i]` is the lifetime Speed needed to have reached level `i + 1`,
  * so entry zero is zero: level 1 is free.
+ *
+ * There is NO LEVEL CAP, so the table has no fixed length: it is extended only
+ * as far as somebody's Speed actually reaches, a row at a time. It stops only
+ * where the sum stops being a number at all - past `Number.MAX_VALUE`, around
+ * level twelve thousand, which is ~1e308 Speed. That row is stored as
+ * `Infinity`, which is exactly what it is: a level no finite total reaches.
  */
-const CUMULATIVE: readonly number[] = (() => {
-  const table: number[] = [0];
-  // One thousand is well past the point the curve saturates, and past any
-  // level the rebirth ladder could gate. The loop stops early when adding the
-  // next level stops changing the total, which is the real ceiling.
-  for (let level = 1; level < 1000; level += 1) {
-    const next = (table[level - 1] as number) + speedForNextLevel(level);
-    if (!Number.isFinite(next) || next >= MAX_TOTAL_SPEED) {
-      table.push(MAX_TOTAL_SPEED);
-      break;
-    }
-    table.push(next);
-  }
-  return table;
-})();
+const CUMULATIVE: number[] = [0];
 
-/** The highest level the curve can express before it saturates. */
-export const MAX_CURVE_LEVEL = CUMULATIVE.length;
+/** True once the table has run into the end of the float64 range. */
+const exhausted = (): boolean => !Number.isFinite(CUMULATIVE[CUMULATIVE.length - 1] as number);
+
+const extendOnce = (): void => {
+  const level = CUMULATIVE.length;
+  CUMULATIVE.push((CUMULATIVE[level - 1] as number) + speedForNextLevel(level));
+};
+
+/** Grow the table until it holds the requirement for `level`. */
+const extendToLevel = (level: number): void => {
+  while (CUMULATIVE.length < level && !exhausted()) extendOnce();
+};
+
+/** Grow the table until its last row is a level `total` has not reached. */
+const extendPastTotal = (total: number): void => {
+  while ((CUMULATIVE[CUMULATIVE.length - 1] as number) <= total && !exhausted()) extendOnce();
+};
 
 /**
  * Cumulative Speed needed to have REACHED `level`. Level 1 costs nothing.
  *
  * Read straight out of the table, so it is the exact sum of the requirements
  * the bar showed on the way up rather than a formula that approximates them.
+ * A level past the end of the float64 range costs `Infinity`.
  */
 export const totalSpeedToReach = (level: number): number => {
   const target = Math.max(1, Math.floor(level));
-  const index = Math.min(target, MAX_CURVE_LEVEL) - 1;
-  return CUMULATIVE[index] as number;
+  extendToLevel(target);
+  return target <= CUMULATIVE.length ? (CUMULATIVE[target - 1] as number) : Infinity;
 };
 
 /** Where a lifetime Speed total sits on the level curve. */
@@ -168,8 +173,6 @@ export interface LevelProgress {
   readonly required: number;
   /** 0..1 fill for the level bar. */
   readonly fraction: number;
-  /** True when the level cap has been reached and the bar is full. */
-  readonly capped: boolean;
 }
 
 /**
@@ -179,16 +182,16 @@ export interface LevelProgress {
  * `total = step * L(L-1)/2` inverted to a quadratic and the level was one
  * square root; a compounding curve has no such inverse, and counting levels in
  * a loop would be a few hundred iterations on a function the HUD calls every
- * frame. Twelve comparisons against a table built once is neither.
+ * frame. Fourteen comparisons against a table grown once is neither.
  *
  * It is also EXACT, which the square root was not: the old version needed two
  * correction loops afterwards to settle a floating-point boundary by a level
  * either way, and a search over the same integers the requirements were summed
  * from has no boundary to settle.
  */
-export const resolveLevel = (totalSpeed: number, levelCap: number): LevelProgress => {
-  const cap = Math.max(1, Math.floor(levelCap));
+export const resolveLevel = (totalSpeed: number): LevelProgress => {
   const total = Number.isFinite(totalSpeed) ? Math.max(0, totalSpeed) : 0;
+  extendPastTotal(total);
 
   // The highest index whose cumulative cost this total covers.
   let lo = 0;
@@ -198,21 +201,15 @@ export const resolveLevel = (totalSpeed: number, levelCap: number): LevelProgres
     if ((CUMULATIVE[mid] as number) <= total) lo = mid;
     else hi = mid - 1;
   }
-  const level = Math.max(1, Math.min(lo + 1, cap));
-
-  if (level >= cap) {
-    const required = speedForNextLevel(cap);
-    return { level: cap, into: required, required, fraction: 1, capped: true };
-  }
+  const level = lo + 1;
 
   const required = speedForNextLevel(level);
-  const into = total - totalSpeedToReach(level);
+  const into = total - (CUMULATIVE[lo] as number);
   return {
     level,
     into,
     required,
-    fraction: required > 0 ? Math.min(Math.max(into / required, 0), 1) : 0,
-    capped: false,
+    fraction: required > 0 && Number.isFinite(required) ? Math.min(Math.max(into / required, 0), 1) : 0,
   };
 };
 
@@ -381,21 +378,30 @@ export const formatSpeedGain = (value: number): string => {
 };
 
 /**
- * The compact ladder, largest first.
+ * The compact ladder, largest first: K, M, B, T, Qa, Qi, Sx, Sp, Oc, No, Dc,
+ * UDc, DDc ... Vg ... Ce, UCe - the short-scale names, one per thousand.
  *
- * It runs to quintillions because this prints WINS as well as Speed, and the
- * Sun trail costs 250 trillion. A figure past the top is shown in exponential
- * rather than as a wall of digits: nothing in the game should reach it, and if
- * something does, a readable oddity beats an unreadable one.
+ * It runs to the END OF FLOAT64 because levels are uncapped: level 1000 alone
+ * costs about 1e28 Speed, and the curve goes on to ~1e308. Generated rather
+ * than typed, because a hundred hand-written suffixes are a hundred chances to
+ * skip one, and a skipped one prints "1000Qa" where "1Qi" belongs.
  */
-const UNITS: readonly (readonly [number, string])[] = [
-  [1e18, 'E'],
-  [1e15, 'Qa'],
-  [1e12, 'T'],
-  [1e9, 'B'],
-  [1e6, 'M'],
-  [1e3, 'K'],
-];
+const UNITS: readonly (readonly [number, string])[] = (() => {
+  const head = ['K', 'M', 'B', 'T', 'Qa', 'Qi', 'Sx', 'Sp', 'Oc', 'No'];
+  const ones = ['', 'U', 'D', 'T', 'Qa', 'Qi', 'Sx', 'Sp', 'Oc', 'No'];
+  const tens = ['', 'Dc', 'Vg', 'Tg', 'Qag', 'Qig', 'Sxg', 'Spg', 'Ocg', 'Nog', 'Ce'];
+  const ladder: [number, string][] = [];
+  // 10^(3k) is the k-th step: K is k = 1, and a -illion's number is k - 1.
+  for (let k = 1; 3 * k <= 308; k += 1) {
+    const illion = k - 1;
+    const name =
+      k <= head.length
+        ? (head[k - 1] as string)
+        : `${ones[illion % 10] as string}${tens[Math.floor(illion / 10)] as string}`;
+    ladder.push([Number(`1e${3 * k}`), name]);
+  }
+  return ladder.reverse();
+})();
 
 /**
  * One decimal place, and NEVER a trailing zero.
@@ -419,8 +425,14 @@ const oneDecimal = (value: number): string => {
  */
 export const formatSpeed = (value: number): string => {
   const amount = Number.isFinite(value) ? Math.max(0, value) : 0;
-  for (const [size, suffix] of UNITS) {
-    if (amount >= size) return `${oneDecimal(amount / size)}${suffix}`;
+  for (let i = 0; i < UNITS.length; i += 1) {
+    const [size, suffix] = UNITS[i] as readonly [number, string];
+    if (amount < size) continue;
+    const text = oneDecimal(amount / size);
+    // 999.96K rounds to "1000K"; that is 1M, one rung up, when there is one.
+    const up = UNITS[i - 1];
+    if (text === '1000' && up) return `1${up[1]}`;
+    return `${text}${suffix}`;
   }
   return Math.floor(amount).toString();
 };
