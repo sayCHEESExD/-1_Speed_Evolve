@@ -1,0 +1,123 @@
+import type { AvatarAppearance, AvatarProportions } from '@evolve/shared';
+import type { MountAnimationState, PlayerMotionState } from '@evolve/shared';
+import type { MapSchema } from '@colyseus/schema';
+
+/**
+ * Client-side TYPE mirror of the server's Colyseus schema.
+ *
+ * These are types only - colyseus.js builds the concrete schema instances at
+ * runtime from the handshake reflection, so there is no duplicated schema
+ * class to keep in sync, only this shape.
+ */
+export interface NetPlayerState extends PlayerMotionState {
+  sessionId: string;
+  /** The MOUNT's transform. The rider is carried and has none of its own. */
+  x: number;
+  y: number;
+  z: number;
+  rotationY: number;
+  animation: MountAnimationState;
+
+  level: number;
+  rebirths: number;
+  wins: number;
+  totalSpeed: number;
+  mountSlot: number;
+  unlockedMounts: number;
+  upgradeSlot: number;
+  speedPerStep: number;
+  totalMultiplier: number;
+  moveMultiplier: number;
+  jumpVelocity: number;
+  maxLevel: number;
+  bestStage: number;
+
+  /** Authoritative velocity, used to reconcile client prediction. */
+  velocityX: number;
+  velocityY: number;
+  velocityZ: number;
+  /** Highest input sequence the server has simulated. */
+  lastInputSeq: number;
+  /** Bitmask of trails bought, and the one worn. Server-owned. */
+  ownedTrails: number;
+  trailSlot: number;
+  /** Bitmask of auras bought, and the one worn. Server-owned. */
+  ownedAuras: number;
+  auraSlot: number;
+  /** Bitmask of items bought, and the one carried. Server-owned. */
+  ownedItems: number;
+  itemSlot: number;
+  /** Latched jump edge, so replay resumes from the server's own edge state. */
+  jumpLatched: boolean;
+  /** Coyote window left, so a replayed jump off a lip is allowed identically. */
+  coyote: number;
+  ready: boolean;
+
+  /**
+   * How this player looks in the Bloxity portal.
+   *
+   * The only replicated field that began life on a client, and the only one
+   * that decides nothing: it chooses meshes and a texture. See
+   * `shared/src/types/avatar.ts`.
+   */
+  avatar: AvatarAppearance & AvatarProportions;
+
+  /**
+   * The name on this player's nameplate and board rows: their Bloxity name, or
+   * the handle the server derived for a signed-out player. Never an id.
+   */
+  displayName: string;
+  /** Their Bloxity portrait URL, or '' for none. */
+  pfp: string;
+}
+
+/**
+ * One replicated guardian.
+ *
+ * The only things in the world that are state rather than a formula, because
+ * they chase.
+ */
+export interface NetGuardianState {
+  x: number;
+  y: number;
+  z: number;
+  rotationY: number;
+  charging: boolean;
+}
+
+/** One row of one leaderboard, exactly as the server ranked it. */
+export interface NetLeaderEntry {
+  handle: string;
+  value: number;
+}
+
+/** The three boards on the spawn wall. Read-only, and entirely the server's. */
+export interface NetLeaderboardState {
+  wins: ArrayLike<NetLeaderEntry>;
+  speed: ArrayLike<NetLeaderEntry>;
+  rebirths: ArrayLike<NetLeaderEntry>;
+}
+
+export interface NetCourseState {
+  players: MapSchema<NetPlayerState>;
+  /** The clock the moving hazards are a pure function of. */
+  elapsed: number;
+  guardians: ArrayLike<NetGuardianState>;
+  leaderboard: NetLeaderboardState;
+}
+
+/** A leaderboard flattened into plain data, ready to draw. */
+export interface LeaderboardSnapshot {
+  wins: readonly NetLeaderEntry[];
+  speed: readonly NetLeaderEntry[];
+  rebirths: readonly NetLeaderEntry[];
+}
+
+/** Connection lifecycle, surfaced to the UI. */
+export type ConnectionStatus =
+  | 'idle'
+  | 'connecting'
+  | 'connected'
+  | 'reconnecting'
+  | 'disconnected'
+  | 'error';
