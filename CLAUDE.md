@@ -965,11 +965,11 @@ the tile count is.
 
 - Laid out as a BEFORE and AFTER pair, the same framing the rebirth panel uses,
   because they are the same question: what am I trading, and for what.
-- It shows the pair of buttons the reference art ends on, and only one of them
-  does anything. **Skip** closes the menu, which is a real action. **Evolve** is
-  the STATE: evolution is automatic, so by the time anyone could press a button
-  the server has already done it, and rather than ship a control that lies it
-  is disabled until the requirement is met and then says what is happening.
+- It has ONE button, and **Evolve** is the STATE: evolution is automatic, so
+  by the time anyone could press a button the server has already done it, and
+  rather than ship a control that lies it is disabled until the requirement is
+  met and then says what is happening. There is no Skip on this menu or the
+  rebirth one: both close from their own close square and Escape.
 - The portraits are the REAL models, rendered once offscreen into data URLs by
   `MountThumbnails` and cached. A second `WebGLRenderer` exists only for as
   long as it takes to draw the roster and is then destroyed. A browser that

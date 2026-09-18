@@ -63,9 +63,8 @@ export class RebirthPanel extends Panel {
     this.barLabel.className = 'aoe-gauge__label aoe-font aoe-outline';
     bar.append(this.barFill, this.barLabel);
 
-    // Rebirth and Skip, as the reference art pairs them. Skip closes: the one
-    // irreversible button in the game gets an equally prominent way out of it,
-    // which is why they are the same size rather than a button and a link.
+    // The Rebirth button alone. Backing out of the one irreversible button in
+    // the game is the panel's own close square, or Escape.
     const buttons = document.createElement('div');
     buttons.className = 'aoe-btn--row aoe-rb__buttons';
     this.action = document.createElement('button');
@@ -77,12 +76,7 @@ export class RebirthPanel extends Panel {
       onRebirth();
       this.setOpen(false);
     });
-    const skip = document.createElement('button');
-    skip.type = 'button';
-    skip.className = 'aoe-btn aoe-btn--orange aoe-font';
-    skip.textContent = 'Skip';
-    skip.addEventListener('click', () => this.setOpen(false));
-    buttons.append(this.action, skip);
+    buttons.append(this.action);
 
     this.body.append(grid, warning, bar, buttons);
     this.render();

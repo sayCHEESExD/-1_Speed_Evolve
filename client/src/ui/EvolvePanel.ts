@@ -89,14 +89,12 @@ export class EvolvePanel extends Panel {
     this.winsLabel.className = 'aoe-evo__wins aoe-font';
 
     /*
-     * The two buttons the reference art shows.
-     *
-     * "Skip" closes the menu, which is a real action. "Evolve" is the STATE:
-     * evolution is automatic, so by the time anyone could press a button the
-     * server has already done it. Rather than ship a control that lies, it is
-     * disabled while the requirement is unmet and says what is happening once
-     * it is met - the same information a button would claim to offer, without
-     * pretending the player is the one causing it.
+     * ONE button, and it is the STATE: evolution is automatic, so by the time
+     * anyone could press a button the server has already done it. Rather than
+     * ship a control that lies, it is disabled while the requirement is unmet
+     * and says what is happening once it is met - the same information a
+     * button would claim to offer, without pretending the player is the one
+     * causing it. The menu closes from its own close square and Escape.
      */
     const buttons = document.createElement('div');
     buttons.className = 'aoe-btn--row aoe-evo__buttons';
@@ -104,12 +102,7 @@ export class EvolvePanel extends Panel {
     this.action.type = 'button';
     this.action.className = 'aoe-btn aoe-btn--green aoe-font';
     this.action.disabled = true;
-    const skip = document.createElement('button');
-    skip.type = 'button';
-    skip.className = 'aoe-btn aoe-btn--orange aoe-font';
-    skip.textContent = 'Skip';
-    skip.addEventListener('click', () => this.setOpen(false));
-    buttons.append(this.action, skip);
+    buttons.append(this.action);
 
     // The whole chain as a strip of pips, so a player can see where they are
     // on a fourteen-rung ladder rather than only the rung in front of them.
