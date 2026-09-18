@@ -25,6 +25,7 @@ import {
   MOVING_SOLIDS,
   pitAt,
   PITS,
+  QUICKSAND,
   resolveMovementProfile,
   shopNear,
   SHOPS,
@@ -242,18 +243,26 @@ console.log('the set pieces');
   const byKind = (kind) => COURSE_HAZARDS.filter((h) => h.kind === kind);
   const motions = (motion) => MOVING_SOLIDS.filter((m) => m.motion === motion);
 
+  const boulders = byKind('boulder');
   const checks = [
-    ['rolling boulders', byKind('boulder').length >= 10],
-    ['swinging obstacles', byKind('swing').length >= 15],
-    ['rotating stone arms', byKind('spinner').length >= 40],
-    ['falling debris', byKind('faller').length >= 20],
-    ['dart traps', byKind('dart').length >= 20],
+    ['boulders rolling down ramps', boulders.filter((h) => h.spanX === 0 && h.fromZ !== h.toZ).length >= 20],
+    ['boulders rolling across the path', boulders.filter((h) => h.spanX === 0 && h.fromZ === h.toZ).length >= 10],
+    ['logs rolling down slopes', boulders.filter((h) => h.spanX > 0 && h.fromZ !== h.toZ).length >= 6],
+    ['logs floating across fords', boulders.filter((h) => h.spanX > 0 && h.fromZ === h.toZ).length >= 12],
+    ['swinging logs', byKind('swing').length >= 12],
+    ['rotating logs and statue arms', byKind('spinner').length >= 50],
+    ['falling temple stones', byKind('faller').length >= 40],
+    ['dart traps', byKind('dart').length >= 25],
+    ['thorn vines', byKind('vine').length >= 15],
     ['lethal waterfalls', byKind('cascade').length >= 6],
-    ['collapsing platforms', motions('collapse').length >= 60],
-    ['orbiting platforms', motions('orbit').length >= 20],
-    ['shuttle platforms', motions('shuttle').length >= 10],
-    ['lifts', motions('lift').length >= 4],
-    ['cave sections', CAVE_REGIONS.length >= 6],
+    ['collapsing bridges and floors', motions('collapse').length >= 80],
+    ['orbiting platforms', motions('orbit').length >= 8],
+    ['moving bridges and rafts', motions('shuttle').length >= 30],
+    ['lifts', motions('lift').length >= 8],
+    ['timed gates', motions('gate').length >= 8],
+    ['quicksand', COURSE_SOLIDS.filter((s) => s.kind === 'quicksand').length >= 50],
+    ['roots across the path', COURSE_SOLIDS.filter((s) => s.kind === 'log' && s.maxY - s.minY > 4).length >= 20],
+    ['cave sections', CAVE_REGIONS.length >= 5],
     ['rivers and rapids', PITS.some((p) => p.surface === 'rapids')],
     ['still water', PITS.some((p) => p.surface === 'water')],
     ['mud', PITS.some((p) => p.surface === 'mud')],
@@ -277,6 +286,31 @@ console.log('the set pieces');
   } else {
     pass('guardians hunt stages 18 and 29');
   }
+}
+
+console.log('quicksand');
+{
+  /*
+   * Every quicksand slab must sit over a MUD POOL whose kill line is exactly
+   * where the simulation drowns a mount: `QUICKSAND.drownDepth` under the
+   * slab's top. Too shallow and a player who pauses for half a second is
+   * dead; missing entirely and a player who stops sinks to the bottom and
+   * stays there, alive and stuck, for ever.
+   */
+  let bad = 0;
+  const sand = COURSE_SOLIDS.filter((s) => s.kind === 'quicksand');
+  for (const slab of sand) {
+    const x = (slab.minX + slab.maxX) / 2;
+    const z = (slab.minZ + slab.maxZ) / 2;
+    const drown = slab.maxY - QUICKSAND.drownDepth;
+    const above = pitAt(x, drown + 0.05, z);
+    const below = pitAt(x, drown - 0.05, z);
+    if (above !== null || below === null) {
+      bad += 1;
+      if (bad === 1) fail(`quicksand at z=${Math.round(z)} (stage ${slab.stage}) does not drown at ${QUICKSAND.drownDepth}`);
+    }
+  }
+  if (bad === 0) pass(`${sand.length} quicksand slabs, every one drowning at exactly ${QUICKSAND.drownDepth} deep`);
 }
 
 console.log('the environment');

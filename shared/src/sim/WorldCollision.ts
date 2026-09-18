@@ -106,6 +106,15 @@ export class WorldCollision {
   /** The instant every query is evaluated at. Set once per simulation step. */
   private time = 0;
 
+  /**
+   * What the last `surfaceYAt` found underfoot, or null over a gap.
+   *
+   * Read by `stepPlayer` straight after the ground test, to know whether the
+   * mount is standing in quicksand. A field rather than a second query,
+   * because the second query would have to repeat every rule of the first.
+   */
+  groundKind: CourseSolid['kind'] | null = null;
+
   /** Scratch, so nothing in the hot path allocates. */
   private readonly hazardAt: MotionPoint = { x: 0, y: 0, z: 0 };
   private readonly offset: MotionPoint = { x: 0, y: 0, z: 0 };
@@ -202,16 +211,25 @@ export class WorldCollision {
    *
    * The body radius is honoured so the mount can stand on a plank edge rather
    * than falling the instant its centre passes it.
+   *
+   * `sink` is how deep THIS player has sunk into quicksand: for them, every
+   * quicksand top is that much lower. Every other surface ignores it.
    */
-  surfaceYAt(x: number, z: number, feetY: number): number | null {
+  surfaceYAt(x: number, z: number, feetY: number, sink = 0): number | null {
     const ceiling = feetY + MOVEMENT.stepHeight;
     let best: number | null = null;
+    let kind: CourseSolid['kind'] | null = null;
     for (const solid of this.near(z)) {
       if (x < solid.minX - MOUNT_RADIUS || x > solid.maxX + MOUNT_RADIUS) continue;
       if (z < solid.minZ - MOUNT_RADIUS || z > solid.maxZ + MOUNT_RADIUS) continue;
-      if (solid.maxY > ceiling) continue;
-      if (best === null || solid.maxY > best) best = solid.maxY;
+      const top = solid.kind === 'quicksand' ? solid.maxY - sink : solid.maxY;
+      if (top > ceiling) continue;
+      if (best === null || top > best) {
+        best = top;
+        kind = solid.kind;
+      }
     }
+    this.groundKind = kind;
     return best;
   }
 
@@ -269,6 +287,8 @@ export class WorldCollision {
   ceilingYAt(x: number, z: number, previousHeadY: number): number | null {
     let best: number | null = null;
     for (const solid of this.near(z)) {
+      // Quicksand is something to sink INTO; its underside is no roof.
+      if (solid.kind === 'quicksand') continue;
       if (x < solid.minX || x > solid.maxX) continue;
       if (z < solid.minZ || z > solid.maxZ) continue;
       if (previousHeadY > solid.minY + CEILING_TOLERANCE) continue;
@@ -298,6 +318,13 @@ export class WorldCollision {
     let out = value;
 
     for (const solid of this.near(axis === 2 ? value : other)) {
+      // Quicksand never blocks: it is laid flush with the ground round it,
+      // and a mount that has sunk into it is INSIDE it by design.
+      if (solid.kind === 'quicksand') continue;
+      // A gate spans the whole route, so it only ever pushes ALONG it. One
+      // that dropped onto a mount and resolved on X would throw them out of
+      // the side of the path, the length of the gate away.
+      if (axis === 0 && solid.kind === 'gate') continue;
       // Not tall enough to block, or entirely above the rider's head.
       if (solid.maxY <= stepTop) continue;
       if (solid.minY >= headY) continue;
@@ -392,7 +419,8 @@ export class WorldCollision {
 
       const reach = hazard.radius + MOUNT_RADIUS;
       if (Math.abs(z - this.hazardAt.z) > reach) continue;
-      if (Math.abs(x - this.hazardAt.x) > reach) continue;
+      // A log is long in X: `spanX` is how much longer than it is thick.
+      if (Math.abs(x - this.hazardAt.x) > reach + hazard.spanX) continue;
       return true;
     }
     return false;

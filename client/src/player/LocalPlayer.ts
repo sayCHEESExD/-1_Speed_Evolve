@@ -127,6 +127,7 @@ export interface AuthoritativeMotion {
   lastInputSeq: number;
   jumpLatched: boolean;
   coyote: number;
+  sink: number;
 }
 
 /**
@@ -472,6 +473,7 @@ export class LocalPlayer {
     // patch and make replay bit-exact.
     this.motion.jumpLatched = state.jumpLatched;
     this.motion.coyote = state.coyote;
+    this.motion.sink = state.sink;
 
     // Drop everything the server has already simulated, then replay the rest.
     let kept = 0;

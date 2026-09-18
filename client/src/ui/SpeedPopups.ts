@@ -4,13 +4,13 @@ import { injectHudStyles } from './hudStyles.js';
 /**
  * Most popups on screen at once.
  *
- * A hard ceiling rather than a hope. Speed arrives on every state patch - the
- * server sends twenty a second - and a system that made one node per patch
- * would put hundreds of elements in the document inside a minute. The pool is
- * allocated once at construction and reused for ever; a spawn that finds
- * nothing free retires the oldest instead of growing.
+ * A memory ceiling, not a limit on what is shown: awards arrive one per
+ * footfall - about ten a second at the very top of the speed curve, so a
+ * dozen on screen - and this is headroom above that. The pool is allocated
+ * once and reused for ever; a spawn that finds nothing free retires the
+ * oldest instead of growing.
  */
-const POOL_SIZE = 14;
+const POOL_SIZE = 24;
 
 /** Seconds one popup stays on screen. Must match the CSS animation. */
 const LIFETIME = 1.15;
@@ -18,17 +18,18 @@ const LIFETIME = 1.15;
 /**
  * The floating "+N" a player sees when they earn Speed.
  *
- * Fed ONLY by what the server says it paid (`SpeedAwarded`): a whole number of
- * steps at one per-step value. Every popup prints that per-step value - the
- * figure `calculateSpeedGain` produced - so a player on a given setup sees the
- * same number on every popup, and a count when one popup stands for several
- * steps: "+125", "+125 x3".
+ * ONE POPUP PER AWARD, printing that award's own amount and nothing else. The
+ * server sends one message per FOOTFALL of the mount, carrying exactly
+ * `footfallSpeedGain` - the Speed that footfall earned, already summed - so a
+ * player on a given setup sees the same "+6 Speed" on every popup.
  *
- * It used to diff the replicated Speed total between patches and release
- * whatever had piled up every quarter of a second, rounded down. The amount
- * in each popup then depended on how many patches landed in the window and on
- * how far the mount happened to move in them, which is what turned one
- * constant rate into "+14", "+15", "+17", "+8".
+ * This class listens to nothing and computes nothing: `Game` hands it each
+ * `SpeedAwarded` message once, and the figure printed is the one in it.
+ *
+ * Two earlier versions got this wrong from the other end. One merged each
+ * quarter-second of awards into "+1.04 x6", and the count read as a multiplier
+ * that kept changing. The next paid and announced every two-unit STEP on its
+ * own, and one stride of the legs came out as twenty "+1" popups.
  *
  * Every position is randomised inside a band that deliberately avoids the
  * three things already on screen - the Wins counter at the top, the rail down
@@ -43,15 +44,6 @@ export class SpeedPopups {
   private readonly free: number[] = [];
   /** Nodes in flight, oldest first, so the pool can always make room. */
   private readonly live: { index: number; timer: number }[] = [];
-
-  /**
-   * Steps paid but not yet shown, grouped by their per-step value in the
-   * order they arrived. Consecutive awards at the same rate merge; a new rate
-   * starts a new group, so no popup ever mixes two rates.
-   */
-  private readonly queue: { perStep: number; steps: number }[] = [];
-  /** Seconds until the next release. */
-  private cooldown = 0;
 
   /**
    * Where the last few popups went, in percent.
@@ -86,30 +78,18 @@ export class SpeedPopups {
   }
 
   /**
-   * The server paid `steps` whole steps at `perStep` each.
+   * The server paid ONE footfall, worth `gain`. It is shown as it arrives.
    *
-   * Nothing is computed here: both numbers are printed as they arrived.
+   * Nothing is computed here and nothing is combined: the number printed is
+   * the number in the message.
    */
-  award(steps: number, perStep: number): void {
-    const count = Math.floor(steps);
-    if (!(count > 0) || !Number.isFinite(perStep) || perStep <= 0) return;
-    const last = this.queue[this.queue.length - 1];
-    if (last && last.perStep === perStep) last.steps += count;
-    else this.queue.push({ perStep, steps: count });
+  award(gain: number): void {
+    if (!Number.isFinite(gain) || gain <= 0) return;
+    this.spawn(gain);
   }
 
-  update(delta: number): void {
-    this.cooldown -= Math.max(0, delta);
-    if (this.cooldown > 0) return;
-
-    // A fixed cadence, so the number of popups on screen is bounded no matter
-    // how fast steps come in. Each release shows ONE rate group: the per-step
-    // figure, and how many steps it stands for.
-    const next = this.queue.shift();
-    if (!next) return;
-    this.cooldown = 0.26;
-    this.spawn(next.perStep, next.steps);
-  }
+  /** Popups run on CSS timers; nothing to advance per frame. */
+  update(_delta: number): void {}
 
   dispose(): void {
     for (const entry of this.live) window.clearTimeout(entry.timer);
@@ -117,7 +97,7 @@ export class SpeedPopups {
     this.root.remove();
   }
 
-  private spawn(perStep: number, steps: number): void {
+  private spawn(gain: number): void {
     // Nothing free: retire the oldest rather than allocate. The ceiling is the
     // point of the pool.
     if (this.free.length === 0) {
@@ -133,9 +113,9 @@ export class SpeedPopups {
     if (!node) return;
 
     const value = node.querySelector('.aoe-pop__value');
-    // Always the per-step figure, never a sum: every step at this rate was
-    // worth exactly this, and the count says how many there were.
-    if (value) value.textContent = `+${formatSpeedGain(perStep)}${steps > 1 ? ` x${steps}` : ''}`;
+    // Exactly the award, and nothing beside it: never a count, a multiplier
+    // or a part of the sum.
+    if (value) value.textContent = `+${formatSpeedGain(gain)} Speed`;
 
     // A random spot inside the band that misses every HUD element. Expressed
     // in percentages, so it holds at any aspect ratio.

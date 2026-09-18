@@ -7,6 +7,7 @@ import {
 import { ROOM_NAME } from '@evolve/shared';
 import { serverConfig } from './config/serverConfig.js';
 import { buxGrants } from './progression/BuxGrants.js';
+import { StorageUnavailableError } from './persistence/index.js';
 import { logger } from './util/logger.js';
 
 const SCOPE = 'webhook';
@@ -75,15 +76,17 @@ export const BUX_WEBHOOK_PATH = '/bloxity/bux';
  * `requestPurchase` result is a receipt it can show; it is not a grant, and
  * nothing in the client is trusted to say a payment happened.
  *
- * ANSWERING 2xx IS THE CONTRACT. Bloxity refunds a purchase whose webhook did
- * not succeed, so this replies 200 for anything it has safely recorded -
- * including a SKU this build does not recognise, which is far more likely to
- * be a catalogue that moved ahead of a deploy than an attack, and which a
- * refund would turn into a purchase the player made and lost.
+ * ANSWERING 2xx IS THE CONTRACT - and a 2xx is only ever sent once the
+ * purchase is DURABLY recorded in the same store as the profiles, keyed by its
+ * transaction id. A 2xx sent before that would be a promise to pay that a
+ * crash could break. Recorded includes a SKU this build does not recognise,
+ * which is far more likely to be a catalogue that moved ahead of a deploy than
+ * an attack.
  *
- * It replies 401 only when a configured secret does not match, and 400 only
- * when the body is not something that can be recorded at all. Both are cases
- * where a refund is the correct outcome.
+ * It replies 401 when a configured secret does not match, 400 when the body is
+ * not something that can be recorded at all, and 503 when storage could not
+ * make it durable - so Bloxity tries again, and the transaction id makes the
+ * retry pay out once.
  */
 const handleBuxWebhook = async (
   request: IncomingMessage,
@@ -108,16 +111,24 @@ const handleBuxWebhook = async (
   }
 
   const body = await readJson(request);
-  if (!body?.transactionId || !body.userId || !body.sku) {
+  const text = (value: unknown): value is string =>
+    typeof value === 'string' && value.length > 0 && value.length <= 128;
+  if (!text(body?.transactionId) || !text(body?.userId) || !text(body?.sku)) {
     logger.warn(SCOPE, 'rejected a webhook with no transaction, user or sku');
     reply(400, { ok: false, error: 'malformed payload' });
     return;
   }
 
-  buxGrants.record(body.userId, body.transactionId, body.sku);
-  logger.info(
-    SCOPE,
-    `accepted ${body.sku} for ${body.username ?? body.userId} [${body.transactionId}]`,
-  );
-  reply(200, { ok: true, transactionId: body.transactionId });
+  try {
+    const outcome = await buxGrants.record(body.userId, body.transactionId, body.sku);
+    logger.info(
+      SCOPE,
+      `${outcome} ${body.sku} for ${body.username ?? body.userId} [${body.transactionId}]`,
+    );
+    reply(200, { ok: true, transactionId: body.transactionId });
+  } catch (error) {
+    const reason = error instanceof StorageUnavailableError ? error.message : String(error);
+    logger.error(SCOPE, `could not record ${body.transactionId} durably - answering 503: ${reason}`);
+    reply(503, { ok: false, error: 'storage unavailable, retry' });
+  }
 };

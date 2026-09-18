@@ -1,9 +1,11 @@
 import {
+  FOOTFALL_DISTANCE,
   MAX_SIM_DELTA,
   SPEED,
   calculateSpeedGain,
   clampSpeed,
   describeSpeedGain,
+  footfallSpeedGain,
   maxLevelForRebirth,
   resolveLevel,
   resolveMovementProfile,
@@ -19,7 +21,7 @@ import { logger } from '../util/logger.js';
 
 const SCOPE = 'speed';
 
-/** Float dust forgiven when deciding whether a stride is complete. World units. */
+/** Float dust forgiven when deciding whether a footfall is complete. World units. */
 const STRIDE_EPSILON = 1e-6;
 
 /** What the server remembers between two simulated steps for one player. */
@@ -30,26 +32,35 @@ interface Tracker {
   /** True until the first step is credited, so spawning pays nothing. */
   fresh: boolean;
   /**
-   * Distance travelled toward the NEXT step, always under one stride.
+   * Distance travelled toward the NEXT footfall, always under one footfall.
    *
-   * The remainder a tick leaves behind is kept here rather than paid out as a
-   * fraction of a step. That is the whole fix: a tick that covered 7.3 units
-   * pays three whole steps and banks 1.3 toward the fourth, instead of paying
-   * "3.65 steps" - which is how a constant rate came out as +14, +15, +17.
+   * The remainder an input leaves behind is kept here rather than paid out as
+   * a fraction. A footfall is paid whole or not at all, which is what keeps
+   * every award the same number - paying "3.65 steps" is how a constant rate
+   * once came out as +14, +15, +17.
    */
   carry: number;
 }
 
-/** Outcome of crediting one movement step. */
+/** One footfall's award: exactly `footfallSpeedGain(...)`, once. */
+export interface SpeedAward {
+  readonly gain: number;
+  /** The authoritative lifetime total once this award had been added. */
+  readonly total: number;
+  readonly source: 'stride' | 'belt';
+}
+
+/** Outcome of crediting one movement input. */
 export interface SpeedGain {
-  /** Whole steps paid, the jump bonus included. Every one is worth `perStep`. */
-  readonly steps: number;
-  /** Of `steps`, how many were the leave-the-ground bonus. */
-  readonly jumpSteps: number;
-  /** What each step was worth: `calculateSpeedGain(...).gain`. */
-  readonly perStep: number;
-  /** Speed added: exactly `steps x perStep`. */
-  readonly gained: number;
+  /**
+   * The footfalls this input completed, in order, each its own award.
+   *
+   * A LIST, and never a count times a rate. Almost always empty or one long:
+   * a footfall is twelve units, and the fastest honest input at sixty a
+   * second covers about two. Every entry's `gain` is the same number for the
+   * same player.
+   */
+  readonly awards: readonly SpeedAward[];
   /** Levels crossed, if any. */
   readonly levelsGained: number;
 }
@@ -58,12 +69,17 @@ export interface SpeedGain {
  * Server authority over Speed farming and levelling.
  *
  * Speed is DERIVED from movement the server actually observes, and it is paid
- * in WHOLE STEPS. Travel accumulates toward the next step; every time it
- * crosses `SPEED.strideDistance` the player is paid one step, and every step
- * is worth exactly `calculateSpeedGain(...).gain` - the single calculation in
- * `shared/src/config/speed.ts`. Leaving the ground pays the configured
- * `jumpBonusSteps` more steps at that same rate. There is no other way Speed
- * is earned, and no fraction of a step is ever paid.
+ * in WHOLE FOOTFALLS. Travel accumulates toward the next one; every time it
+ * crosses `FOOTFALL_DISTANCE` the player is paid ONE award of exactly
+ * `footfallSpeedGain` - the gain of the `SPEED.footfallSteps` steps it
+ * covered, from the single calculation in `shared/src/config/speed.ts`. There
+ * is no jump bonus, no combo and no other way Speed is earned, and no fraction
+ * of a footfall is ever paid. Each award is added on its own and announced on
+ * its own, so one footfall is one popup showing that one figure.
+ *
+ * It used to pay every two-unit STEP as its own award - up to sixty a second
+ * at the top of the curve. The Speed was right, and the screen was a spray of
+ * "+1"s for every stride of the legs.
  *
  * A client cannot ask for Speed: the distance is measured between positions
  * the server simulated itself, a single step is capped at a plausible
@@ -93,8 +109,10 @@ export class SpeedService {
    * Drop the movement baseline.
    *
    * Called on every respawn: the teleport back to the arena is a huge position
-   * delta that must never be credited as distance travelled. The part-step in
-   * `carry` goes too - it was travel on a run that has ended.
+   * delta that must never be credited as distance travelled. The part-footfall
+   * in `carry` is KEPT: it is distance the server watched the player ride, and
+   * at twelve units a footfall, dropping it on every death would quietly pay a
+   * player who falls less per unit ridden than one who never does.
    */
   reset(sessionId: string, player: PlayerState): void {
     this.trackers.set(sessionId, {
@@ -102,7 +120,7 @@ export class SpeedService {
       z: player.z,
       grounded: true,
       fresh: true,
-      carry: 0,
+      carry: this.trackers.get(sessionId)?.carry ?? 0,
     });
   }
 
@@ -112,18 +130,19 @@ export class SpeedService {
    * Call AFTER the transform has been updated, so the tracker advances to the
    * position the server just simulated.
    */
-  credit(sessionId: string, player: PlayerState, stepSeconds: number): SpeedGain {
+  credit(sessionId: string, player: PlayerState, stepSeconds: number, seq = -1): SpeedGain {
     const tracker = this.trackers.get(sessionId);
     if (!tracker) {
       this.reset(sessionId, player);
-      return { steps: 0, jumpSteps: 0, perStep: 0, gained: 0, levelsGained: 0 };
+      return { awards: [], levelsGained: 0 };
     }
 
-    // THE rate. One call; nothing is multiplied in below this line.
-    const perStep = calculateSpeedGain(this.gainInputs(player)).gain;
+    // THE award. One call; nothing is multiplied in below this line.
+    const breakdown = calculateSpeedGain(this.gainInputs(player));
+    const perFootfall = footfallSpeedGain(breakdown);
 
-    let strideSteps = 0;
-    let jumpSteps = 0;
+    let footfalls = 0;
+    const source = player.treadmill > 0 ? 'belt' : 'stride';
 
     if (!tracker.fresh) {
       let distance = 0;
@@ -143,20 +162,31 @@ export class SpeedService {
         // Validated against the SAME speed the player actually moves at.
         // Anything beyond it is a teleport and pays nothing at all.
         if (moved <= this.maxCreditedStep(player, stepSeconds)) distance = moved;
-
-        // Leaving the ground: the configured number of extra steps, at the
-        // same per-step rate as travel, so it scales with every multiplier.
-        if (tracker.grounded && !player.grounded) jumpSteps = SPEED.jumpBonusSteps;
+        // There is NO jump bonus. Leaving the ground used to pay two extra
+        // steps, which put a second, occasional source of Speed next to the
+        // one every step pays.
       }
 
-      // Whole steps only. The remainder waits for the next tick.
+      // Whole footfalls only. The remainder waits for the next input.
       //
       // STRIDE_EPSILON forgives float dust, nothing more: sixty honest moves
       // of 0.4 add up to 23.9999999999 rather than 24, and without it the
-      // twelfth stride would sit one ten-billionth short until the next tick.
+      // second footfall would sit one ten-billionth short until the next input.
+      const carryBefore = tracker.carry;
       tracker.carry += distance;
-      strideSteps = Math.floor((tracker.carry + STRIDE_EPSILON) / SPEED.strideDistance);
-      tracker.carry = Math.max(0, tracker.carry - strideSteps * SPEED.strideDistance);
+      footfalls = Math.floor((tracker.carry + STRIDE_EPSILON) / FOOTFALL_DISTANCE);
+      tracker.carry = Math.max(0, tracker.carry - footfalls * FOOTFALL_DISTANCE);
+      if (serverConfig.logSpeedAwards && footfalls > 0) {
+        const b = breakdown;
+        logger.info(
+          SCOPE,
+          `TRACE ${player.displayName || sessionId} input#${seq} dt=${stepSeconds.toFixed(4)} ` +
+            `moved=${distance.toFixed(3)} carry ${carryBefore.toFixed(3)}->${tracker.carry.toFixed(3)} ` +
+            `footfalls=${footfalls} | base ${b.base} animal x${b.animal} ` +
+            `training x${b.training} items x${b.items} trail x${b.trail} aura x${b.aura} ` +
+            `rebirth x${b.rebirth} = step ${b.gain} x${SPEED.footfallSteps} steps = award ${perFootfall}`,
+        );
+      }
     }
 
     tracker.x = player.x;
@@ -164,23 +194,19 @@ export class SpeedService {
     tracker.grounded = player.grounded;
     tracker.fresh = false;
 
-    const steps = strideSteps + jumpSteps;
-    const gained = steps * perStep;
+    // Each footfall is added ON ITS OWN, and each is exactly `perFootfall`.
+    // Never `footfalls x perFootfall` in one go: a count beside a number is
+    // what once read as a multiplier that changed from moment to moment.
     const beforeLevel = player.level;
-    if (steps > 0) player.totalSpeed = clampSpeed(player.totalSpeed + gained);
+    const awards: SpeedAward[] = [];
+    for (let i = 0; i < footfalls; i += 1) {
+      player.totalSpeed = clampSpeed(player.totalSpeed + perFootfall);
+      awards.push({ gain: perFootfall, total: player.totalSpeed, source });
+    }
 
     this.syncDerived(player);
 
-    if (steps > 0 && serverConfig.logSpeedAwards) {
-      logger.info(
-        SCOPE,
-        `${player.displayName || sessionId} paid ${steps} step(s)` +
-          (jumpSteps ? ` (${jumpSteps} jump)` : '') +
-          ` x ${perStep} = +${gained} -> total ${player.totalSpeed}`,
-      );
-    }
-
-    return { steps, jumpSteps, perStep, gained, levelsGained: player.level - beforeLevel };
+    return { awards, levelsGained: player.level - beforeLevel };
   }
 
   /**

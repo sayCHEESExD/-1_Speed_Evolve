@@ -1,10 +1,11 @@
 import { MOVEMENT, resolveMovementProfile } from '../movement.js';
-import { COURSE, STAGE_TUNING } from './metrics.js';
+import { COURSE, QUICKSAND, STAGE_TUNING } from './metrics.js';
 import {
   block,
   box,
   cave,
   decorate,
+  hazard,
   jitter,
   mover,
   pit,
@@ -82,6 +83,23 @@ export interface StretchOptions {
    * the difficulty can keep climbing without the obstacles changing.
    */
   readonly shoulders?: number;
+  /**
+   * Width of the jungle VERGE laid either side of the path, level with it.
+   *
+   * Walkable, and part of the route: a trail cut through the forest has
+   * undergrowth to its edges rather than a clean kerb and a drop. Defaults to
+   * the cursor's own `verge`. Every obstacle that spans the route spans the
+   * verge too, so it is never a way round one.
+   */
+  readonly verge?: number;
+  /**
+   * Climb or descend in a STRAIGHT line rather than an eased curve.
+   *
+   * For ramps something rolls down: a boulder or a log travels a straight
+   * line between its two ends, and a ramp that eased in and out would leave
+   * it floating over the middle of the slope or sunk into its ends.
+   */
+  readonly linear?: boolean;
 }
 
 export class Route {
@@ -97,6 +115,21 @@ export class Route {
   width: number;
   /** Material the next stretch will be made of. */
   kind: SolidKind = 'dirt';
+  /** Default jungle verge either side of every stretch. See `StretchOptions.verge`. */
+  verge = 0;
+
+  /** True while laying a `linear` stretch. */
+  private straight = false;
+
+  /**
+   * The centre line as it was actually laid: one sample per slab, in Z order.
+   *
+   * What scenery asks when it wants to stand BESIDE the path at a given Z.
+   * The cursor only knows where the route ended, and on a trail twenty-eight
+   * wide that wanders from side to side, a tree placed off the end of the
+   * stretch is a tree in the middle of it.
+   */
+  private readonly trace: { z: number; x: number; y: number; half: number }[] = [];
 
   /**
    * How far a full-speed jump carries at this stage's recommended level.
@@ -219,11 +252,16 @@ export class Route {
     this.applyTargets(options);
     const width = options.width ?? this.width;
     const kind = options.kind ?? this.kind;
+    const verge = options.verge ?? this.verge;
     const steps = Math.max(1, Math.round(length / STEP));
     const span = length / steps;
+    this.straight = options.linear === true;
 
     for (let i = 0; i < steps; i += 1) {
-      const t = (i + 1) / steps;
+      // A straight ramp samples each slab at its MIDDLE, so the slab sits
+      // centred on the line a boulder rolls down; a curve samples its far end,
+      // which is what makes a bend step round rather than cut its corner.
+      const t = this.straight ? (i + 0.5) / steps : (i + 1) / steps;
       const x = this.lerpX(t);
       const y = this.lerpY(t);
       const z = this.z + span * (i + 0.5);
@@ -232,11 +270,66 @@ export class Route {
       box(this.stage, kind, x, y, z, width, span + 0.35);
       if (options.rails) this.railsAt(x, y, z, width, span, kind);
       if (options.shoulders) this.shouldersAt(x, y, z, width, span, options.shoulders);
+      if (verge > 0) this.vergeAt(x, y, z, width, span, verge);
       this.noteGround(y);
+      this.mark(x, y, z, width / 2 + verge);
     }
 
+    this.straight = false;
     this.commit(length);
     return this;
+  }
+
+  /**
+   * Record ground the cursor did not lay itself - a lift at the bottom of its
+   * travel, a ferry, a stone on a carousel - so the kill volume under this
+   * stretch goes below it rather than through it.
+   */
+  standing(y: number): this {
+    this.noteGround(y);
+    return this;
+  }
+
+  /**
+   * Where the route is at a world Z: its centre, its height and its half
+   * width there, from the nearest slab actually laid. Null before anything
+   * has been laid at all.
+   */
+  lineAt(z: number): { x: number; y: number; half: number } | null {
+    const trace = this.trace;
+    if (trace.length === 0) return null;
+    let lo = 0;
+    let hi = trace.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if ((trace[mid] as { z: number }).z < z) lo = mid + 1;
+      else hi = mid;
+    }
+    const after = trace[lo] as { z: number; x: number; y: number; half: number };
+    const before = trace[Math.max(0, lo - 1)] as typeof after;
+    return Math.abs(before.z - z) < Math.abs(after.z - z) ? before : after;
+  }
+
+  /**
+   * Record a piece of route just laid, for `lineAt`. Public for builders
+   * that lay ground by hand - a fork's two lanes - so the scenery still
+   * knows where not to plant.
+   */
+  markLine(x: number, y: number, z: number, half: number): void {
+    this.mark(x, y, z, half);
+  }
+
+  private mark(x: number, y: number, z: number, half: number): void {
+    const last = this.trace[this.trace.length - 1];
+    // Kept in Z order: anything laid behind the last sample (a spur, a
+    // platform) is not the line.
+    if (last && z < last.z) return;
+    this.trace.push({ z, x, y, half });
+  }
+
+  /** The width a stretch actually offers underfoot: the path and both verges. */
+  fullWidth(options: { width?: number; verge?: number } = {}): number {
+    return (options.width ?? this.width) + 2 * (options.verge ?? this.verge);
   }
 
   /**
@@ -290,6 +383,7 @@ export class Route {
       const z = this.z + span * (i + 0.5);
       box(this.stage, 'rope', x, y, z, width, span * 0.72, 0.9);
       this.noteGround(y - 1);
+      this.mark(x, y, z, width / 2);
     }
 
     // The towers at each end, and the ropes between them.
@@ -346,6 +440,7 @@ export class Route {
       const x = this.lerpX(t) + this.wobble(options.scatter ?? 0.8);
       const y = this.lerpY(t);
       box(this.stage, 'log', x, y, this.z + at + run / 2, width, run, 2.4);
+      this.mark(x, y, this.z + at + run / 2, width / 2);
       // The stub of a branch, so a log reads as a tree rather than a beam.
       decorate(this.stage, 'fallenLog', x + width * 0.9, y - 1.6, this.z + at + run * 0.3, 0.7, 0.4, 1);
       this.noteGround(y);
@@ -379,6 +474,7 @@ export class Route {
       const y = this.lerpY(t) + (i % 2 === 0 ? 0 : -0.5);
       box(this.stage, options.kind ?? 'rock', x, y, this.z + at + size / 2, size, size, 2.6);
       this.noteGround(y);
+      this.mark(x, y, this.z + at + size / 2, size / 2);
     }
 
     this.commit(total);
@@ -407,6 +503,7 @@ export class Route {
       // tread with a gap under it the player can see the sky through.
       box(this.stage, kind, x, y, this.z + run * (i + 0.5), width, run + 0.3, rise + 2.2);
       this.noteGround(y);
+      this.mark(x, y, this.z + run * (i + 0.5), width / 2);
     }
 
     this.x = this.lerpX(1);
@@ -479,6 +576,7 @@ export class Route {
       z += options.gap;
       box(this.stage, kind, x, y, z + options.land / 2, width, options.land, depth);
       this.noteGround(y);
+      this.mark(x, y, z + options.land / 2, width / 2);
       z += options.land;
     }
 
@@ -557,6 +655,7 @@ export class Route {
         box(this.stage, kind, centreX, y, z, half * 2, span + 0.35);
       }
       this.noteGround(y);
+      this.mark(centreX, y, z, half);
     }
 
     this.x = centreX;
@@ -721,9 +820,511 @@ export class Route {
         },
       );
       this.noteGround(this.lerpY(t));
+      this.mark(this.lerpX(t), this.lerpY(t), this.z + span * (i + 0.5), width / 2);
     }
 
     this.commit(length);
+    return this;
+  }
+
+  // -------------------------------------------------------------------------
+  // Obstacles ON the ground.
+  //
+  // The course is wide: difficulty comes from what is in the way, not from
+  // how little floor there is. Every one of these lays its OWN ground and puts
+  // its hazards on the line it actually laid, so an obstacle on a stretch that
+  // curves or climbs is still on that stretch - never where the cursor ended.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Buttress roots grown ACROSS the trail: a low wall to jump.
+   *
+   * Not lethal - running into one stops the mount dead, and on a stage where
+   * something is coming that is exactly as bad. Taller than a step and well
+   * under a jump, at every level.
+   */
+  rootsAcross(
+    length: number,
+    options: StretchOptions & { count: number; height?: number; depth?: number },
+  ): this {
+    const height = options.height ?? 2.6;
+    const depth = options.depth ?? 3;
+    const full = this.fullWidth(options);
+    const startZ = this.z;
+    const line = this.span(options);
+    this.path(length, options);
+    for (let i = 0; i < options.count; i += 1) {
+      const t = (i + 1) / (options.count + 1);
+      const x = line.x(t);
+      const y = line.y(t);
+      const z = startZ + length * t;
+      box(this.stage, 'log', x, y + height, z, full + 1, depth, height + 2);
+      for (const side of [-1, 1]) {
+        decorate(this.stage, 'root', x + side * (full / 2 + 1), y, z, 1.6, side > 0 ? 0.3 : -0.3, i % 2);
+      }
+    }
+    return this;
+  }
+
+  /**
+   * Quicksand: a flat stretch that swallows a mount that stops on it.
+   *
+   * Laid across the WHOLE width, verges included, over a mud pool whose kill
+   * line sits exactly `QUICKSAND.drownDepth` under the surface - so the
+   * simulation sinks the mount and the ordinary fall test drowns it. `islands`
+   * are firm hummocks a hair proud of the mud: somewhere to stand while
+   * waiting for whatever comes next, and the reason a quicksand field can sit
+   * in front of a gate without being a lottery.
+   */
+  quicksand(
+    length: number,
+    options: StretchOptions & { islands?: number; islandSize?: number } = {},
+  ): this {
+    const full = this.fullWidth(options);
+    const startZ = this.z;
+    const top = this.y;
+    const line = this.span({ ...options, rise: top });
+    const steps = Math.max(1, Math.round(length / STEP));
+    const span = length / steps;
+    this.applyTargets({ ...options, rise: top });
+    let minX = Infinity;
+    let maxX = -Infinity;
+
+    for (let i = 0; i < steps; i += 1) {
+      const t = (i + 1) / steps;
+      const x = line.x(t);
+      const z = startZ + span * (i + 0.5);
+      box(this.stage, 'quicksand', x, top, z, full, span + 0.35);
+      this.mark(x, top, z, full / 2);
+      minX = Math.min(minX, x - full / 2);
+      maxX = Math.max(maxX, x + full / 2);
+      this.noteGround(top);
+    }
+    pit(this.stage, 'mud', minX, maxX, startZ, startZ + length, top - QUICKSAND.drownDepth + 1.4);
+
+    const islands = options.islands ?? 0;
+    const size = options.islandSize ?? Math.min(12, full * 0.4);
+    for (let i = 0; i < islands; i += 1) {
+      const t = (i + 0.5) / islands;
+      const side = i % 2 === 0 ? -1 : 1;
+      const x = line.x(t) + side * (full / 2 - size / 2 - 1);
+      box(this.stage, 'dirt', x, top + 0.25, startZ + length * t, size, size, 2.2);
+      decorate(this.stage, 'fern', x, top + 0.25, startZ + length * t, 0.8, 0, i % 3);
+    }
+
+    this.commit(length);
+    return this;
+  }
+
+  /**
+   * A ford: a stony river bed just under running water.
+   *
+   * The player wades it; the water is drawn over the mount's legs. Step off
+   * the bed and it is deep, and deep water kills. `current` pushes sideways
+   * the way the river runs, and `logs` float across the ford on it - long,
+   * lavender, and timed.
+   */
+  ford(
+    length: number,
+    options: StretchOptions & {
+      depth?: number;
+      current?: number;
+      logs?: { count: number; rate: number; radius?: number; length?: number };
+    } = {},
+  ): this {
+    const depth = options.depth ?? 0.7;
+    const full = this.fullWidth({ ...options, verge: 0 });
+    const startZ = this.z;
+    const line = this.span(options);
+    this.path(length, { ...options, kind: options.kind ?? 'rock', verge: 0 });
+    const y = Math.min(line.y(0), line.y(1));
+    pit(this.stage, 'rapids', -COURSE.halfWidth - 40, COURSE.halfWidth + 40, startZ, startZ + length, y + depth, Math.abs(options.current ?? 0) + 0.4);
+    if (options.current) surface(this.stage, -COURSE.halfWidth - 40, COURSE.halfWidth + 40, startZ, startZ + length, 1, options.current, 0);
+
+    const logs = options.logs;
+    if (logs) {
+      const radius = logs.radius ?? 1.3;
+      const half = (logs.length ?? 9) / 2;
+      const dir = (options.current ?? 1) >= 0 ? 1 : -1;
+      for (let i = 0; i < logs.count; i += 1) {
+        const t = (i + 0.5) / logs.count;
+        const x = line.x(t);
+        const reach = full / 2 + half + radius + 3;
+        hazard(this.stage, 'boulder', {
+          x: x - dir * reach,
+          y: line.y(t) + radius * 0.8,
+          z: startZ + length * t,
+          radius,
+          rate: logs.rate,
+          phase: (i * 0.37) % 1,
+          fromZ: startZ + length * t,
+          toZ: startZ + length * t,
+          driftX: dir * reach * 2,
+          spanX: half,
+        });
+      }
+    }
+    return this;
+  }
+
+  /**
+   * Logs rolling DOWN a slope at the rider: a straight ramp climbing ahead,
+   * with trunks across its whole width coming the other way. Jump each one.
+   */
+  rollingLogs(
+    length: number,
+    options: StretchOptions & { count: number; rate: number; climb?: number; radius?: number },
+  ): this {
+    const radius = options.radius ?? 1.5;
+    const climb = options.climb ?? length * 0.06;
+    const full = this.fullWidth(options);
+    const startZ = this.z;
+    const fromY = this.y;
+    const toY = this.y + climb;
+    const line = this.span({ ...options, rise: toY });
+    this.path(length, { ...options, rise: toY, linear: true });
+    for (let i = 0; i < options.count; i += 1) {
+      hazard(this.stage, 'boulder', {
+        x: line.x(0.5),
+        y: toY + radius,
+        z: startZ + length,
+        radius,
+        rate: options.rate,
+        phase: i / options.count,
+        fromZ: startZ + length + radius,
+        toZ: startZ - radius * 2,
+        fromY: toY + radius,
+        toY: fromY + radius,
+        driftX: line.x(0) - line.x(1),
+        spanX: full / 2 + 1 - radius,
+      });
+    }
+    return this;
+  }
+
+  /**
+   * Boulders rolling down a ramp.
+   *
+   * `toward` rolls them UP the rider's way - the ramp climbs ahead and they
+   * come down it at the player, to be dodged across a wide slope. Otherwise
+   * the ramp DESCENDS and they roll the same way the rider is going: the
+   * chase, which is outrun or sidestepped into the alcoves on either side.
+   */
+  boulderRun(
+    length: number,
+    options: StretchOptions & {
+      count: number;
+      rate: number;
+      drop: number;
+      radius?: number;
+      toward?: boolean;
+      alcoves?: number;
+    },
+  ): this {
+    const radius = options.radius ?? 4.5;
+    const full = this.fullWidth(options);
+    const startZ = this.z;
+    const y0 = this.y;
+    const y1 = options.toward ? this.y + options.drop : this.y - options.drop;
+    const line = this.span({ ...options, rise: y1 });
+    this.path(length, { ...options, rise: y1, linear: true });
+
+    const lanes = Math.max(2, Math.floor(full / (radius * 2 + 3)));
+    for (let i = 0; i < options.count; i += 1) {
+      const lane = (i * 5) % lanes;
+      const offset = -full / 2 + radius + 1 + (lane * (full - radius * 2 - 2)) / Math.max(1, lanes - 1);
+      const from = options.toward ? 1 : 0;
+      const to = options.toward ? 0 : 1;
+      const fromZ = startZ + length * from + (options.toward ? radius : -radius * 3);
+      const toZ = startZ + length * to + (options.toward ? -radius * 3 : radius);
+      hazard(this.stage, 'boulder', {
+        x: line.x(from) + offset,
+        y: (from ? y1 : y0) + radius,
+        z: fromZ,
+        radius,
+        rate: options.rate,
+        phase: i / options.count,
+        fromZ,
+        toZ,
+        fromY: (from ? y1 : y0) + radius,
+        toY: (to ? y1 : y0) + radius,
+        driftX: line.x(to) - line.x(from),
+      });
+    }
+
+    // Alcoves cut into the sides: a pocket to step into and let one pass.
+    const alcoves = options.alcoves ?? 0;
+    for (let i = 0; i < alcoves; i += 1) {
+      const t = (i + 0.5) / alcoves;
+      const side = i % 2 === 0 ? 1 : -1;
+      const x = line.x(t) + side * (full / 2 + 4);
+      box(this.stage, this.kind, x, line.y(t), startZ + length * t, 8, 14);
+      decorate(this.stage, 'torch', x + side * 3, line.y(t), startZ + length * t, 1, 0, 0);
+    }
+    return this;
+  }
+
+  /**
+   * Boulders rolling ACROSS the route, out of the jungle on one side and into
+   * it on the other. Waited for, or run past.
+   */
+  crossingBoulders(
+    length: number,
+    options: StretchOptions & { count: number; rate: number; radius?: number },
+  ): this {
+    const radius = options.radius ?? 3.2;
+    const full = this.fullWidth(options);
+    const startZ = this.z;
+    const line = this.span(options);
+    this.path(length, options);
+    for (let i = 0; i < options.count; i += 1) {
+      const t = (i + 0.5) / options.count;
+      const dir = i % 2 === 0 ? 1 : -1;
+      const reach = full / 2 + radius + 4;
+      const z = startZ + length * t;
+      const y = line.y(t) + radius;
+      hazard(this.stage, 'boulder', {
+        x: line.x(t) - dir * reach,
+        y,
+        z,
+        radius,
+        rate: options.rate,
+        phase: (i * 0.41) % 1,
+        fromZ: z,
+        toZ: z,
+        fromY: y,
+        toY: y,
+        driftX: dir * reach * 2,
+      });
+    }
+    return this;
+  }
+
+  /**
+   * Rotating logs: arms sweeping round a hub in the middle of the trail,
+   * a jump high. Timed, or jumped.
+   */
+  sweepers(
+    length: number,
+    options: StretchOptions & { count: number; rate: number; arms?: number; height?: number },
+  ): this {
+    const full = this.fullWidth(options);
+    const arms = options.arms ?? 1;
+    const height = options.height ?? 1.3;
+    const startZ = this.z;
+    const line = this.span(options);
+    this.path(length, options);
+    const reach = full / 2;
+    for (let i = 0; i < options.count; i += 1) {
+      const t = (i + 0.5) / options.count;
+      const x = line.x(t);
+      const y = line.y(t);
+      const z = startZ + length * t;
+      // The hub: a stump the arm turns on. Solid, and in the way.
+      box(this.stage, 'log', x, y + 3, z, 2.4, 2.4, 3.2);
+      for (let a = 0; a < arms; a += 1) {
+        for (let d = 2.6; d <= reach; d += 2.4) {
+          hazard(this.stage, 'spinner', {
+            x,
+            y: y + height,
+            z,
+            radius: 1.2,
+            sweep: d,
+            rate: options.rate * (i % 2 === 0 ? 1 : -1),
+            phase: (a / arms + i * 0.29) % 1,
+          });
+        }
+      }
+    }
+    return this;
+  }
+
+  /** Logs hung from the canopy, swinging across the trail. */
+  swinging(
+    length: number,
+    options: StretchOptions & { count: number; rate: number; low?: number; log?: number },
+  ): this {
+    const full = this.fullWidth(options);
+    const startZ = this.z;
+    const line = this.span(options);
+    this.path(length, options);
+    const log = options.log ?? 4;
+    for (let i = 0; i < options.count; i += 1) {
+      const t = (i + 0.5) / options.count;
+      const x = line.x(t);
+      const y = line.y(t);
+      const z = startZ + length * t;
+      hazard(this.stage, 'swing', {
+        x,
+        y: y + (options.low ?? 1.6),
+        z,
+        radius: 1.3,
+        sweep: full / 2 - log / 2,
+        rate: options.rate,
+        phase: (i * 0.31) % 1,
+        spanX: log / 2,
+      });
+      for (const side of [-1, 1]) decorate(this.stage, 'vine', x + side * (full / 2 - 1), y + 16, z, 1.2, 0, i % 3);
+    }
+    return this;
+  }
+
+  /** Thorn vines swinging across the trail from the canopy: dodged, never jumped. */
+  vines(
+    length: number,
+    options: StretchOptions & { count: number; rate: number; sweep?: number },
+  ): this {
+    const full = this.fullWidth(options);
+    const startZ = this.z;
+    const line = this.span(options);
+    this.path(length, options);
+    const sweep = options.sweep ?? full * 0.3;
+    for (let i = 0; i < options.count; i += 1) {
+      const t = (i + 0.5) / options.count;
+      const lane = ((i * 3) % 5) / 4 - 0.5;
+      const x = line.x(t) + lane * (full - sweep * 2 - 2);
+      const y = line.y(t);
+      hazard(this.stage, 'vine', {
+        x,
+        y: y + 18,
+        z: startZ + length * t,
+        radius: 0.9,
+        sweep,
+        rate: options.rate,
+        phase: (i * 0.23) % 1,
+        fromY: y - 0.5,
+      });
+      // Hung FROM something: a canopy crown over the anchor. A lavender
+      // column swinging from open sky is a thing floating, not a vine.
+      decorate(this.stage, 'tree', x, y + 18, startZ + length * t, 2.2, i * 1.3, 1);
+    }
+    return this;
+  }
+
+  /**
+   * Falling temple stones: a grid of crushers over the floor, each with the
+   * shadow that tells the player it is coming.
+   */
+  crushers(
+    length: number,
+    options: StretchOptions & { rows: number; lanes?: number; period: number; size?: number },
+  ): this {
+    const full = this.fullWidth(options);
+    const lanes = options.lanes ?? 2;
+    const size = options.size ?? Math.min(5, full / (lanes * 2));
+    const startZ = this.z;
+    const line = this.span(options);
+    this.path(length, options);
+    for (let row = 0; row < options.rows; row += 1) {
+      const t = (row + 0.5) / options.rows;
+      for (let lane = 0; lane < lanes; lane += 1) {
+        const offset = -full / 2 + (full * (lane + 0.5)) / lanes;
+        hazard(this.stage, 'faller', {
+          x: line.x(t) + offset,
+          y: line.y(t),
+          z: startZ + length * t,
+          radius: size,
+          sweep: 16,
+          rate: options.period,
+          phase: ((row * 0.37 + lane * 0.5) % 1),
+        });
+      }
+    }
+    return this;
+  }
+
+  /** Dart traps: bolts fired across the trail from one wall to the other. */
+  darts(
+    length: number,
+    options: StretchOptions & { count: number; period: number; height?: number },
+  ): this {
+    const full = this.fullWidth(options);
+    const startZ = this.z;
+    const line = this.span(options);
+    this.path(length, options);
+    for (let i = 0; i < options.count; i += 1) {
+      const t = (i + 0.5) / options.count;
+      const side = i % 2 === 0 ? 1 : -1;
+      const x = line.x(t);
+      const y = line.y(t);
+      const z = startZ + length * t;
+      hazard(this.stage, 'dart', {
+        x: x + side * (full / 2 + 2),
+        y: y + (options.height ?? 2.4),
+        z,
+        radius: 0.9,
+        sweep: -side * (full + 4),
+        rate: options.period,
+        phase: (i * 0.29) % 1,
+      });
+      decorate(this.stage, 'stele', x + side * (full / 2 + 3.5), y, z, 0.9, side > 0 ? -Math.PI / 2 : Math.PI / 2, 0);
+    }
+    return this;
+  }
+
+  /**
+   * A timed gate across the whole route, too tall to jump, in a frame of
+   * posts. Laid on a short run of ground; the builder decides what is in
+   * front of it - usually something that punishes standing still.
+   */
+  gate(options: StretchOptions & { rate: number; hold?: number; phase?: number; height?: number; lift?: number } ): this {
+    const full = this.fullWidth(options);
+    const height = options.height ?? 13;
+    const lift = options.lift ?? 8.5;
+    const length = 12;
+    const x = this.x;
+    const y = this.y;
+    const z = this.z + length / 2;
+    this.path(length, options);
+    mover(this.stage, 'gate', x, y + height, z, full + 2, 3, 'gate', {
+      amount: lift,
+      rate: options.rate,
+      phase: options.phase ?? 0,
+      hold: options.hold ?? 0.5,
+      thickness: height,
+    });
+    // The frame: two posts and a lintel above the lifted gate.
+    const post = options.kind === 'gilded' || options.kind === 'stone' || options.kind === 'ruin' ? 'stone' : 'log';
+    for (const side of [-1, 1]) {
+      block(this.stage, post, x + side * (full / 2 + 1) - 1.8, y, z - 2.4, 3.6, height + lift + 3, 4.8);
+    }
+    block(this.stage, post, x - full / 2 - 3, y + height + lift + 3, z - 2.4, full + 6, 2.6, 4.8);
+    return this;
+  }
+
+  /**
+   * A raft or barge that ferries the rider across a gap too wide to jump:
+   * a z-shuttle that touches the near bank at one end of its run and the far
+   * bank at the other. Waited for, boarded, ridden, and left.
+   */
+  ferry(
+    gap: number,
+    options: { size: number; width?: number; rate: number; phase?: number; kind?: SolidKind; x?: number },
+  ): MovingSolid {
+    const travel = Math.max(0, (gap - options.size) / 2);
+    const platform = mover(
+      this.stage,
+      options.kind ?? 'log',
+      options.x ?? this.x,
+      this.y,
+      this.z + gap / 2,
+      options.width ?? Math.min(18, this.fullWidth()),
+      options.size,
+      'shuttle',
+      { axis: 'z', amount: travel, rate: options.rate, phase: options.phase ?? 0 },
+    );
+    this.gap(gap);
+    return platform;
+  }
+
+  /**
+   * A slide: a straight descent on slick ground that pushes the rider down
+   * it. Harder to stop and to steer than to go fast on.
+   */
+  slide(length: number, drop: number, options: StretchOptions & { grip?: number; push?: number } = {}): this {
+    const startZ = this.z;
+    this.path(length, { ...options, rise: this.y - drop, linear: true });
+    surface(this.stage, -COURSE.halfWidth - 40, COURSE.halfWidth + 40, startZ, this.z, options.grip ?? 0.35, 0, options.push ?? 0);
     return this;
   }
 
@@ -763,6 +1364,19 @@ export class Route {
     }
   }
 
+  /**
+   * Jungle verge either side of a slab: undergrowth to the path's edges.
+   *
+   * A hair BELOW the path - under one step height - so the trail reads as cut
+   * through it, and so its top never shares a plane with the path's and
+   * flickers.
+   */
+  private vergeAt(x: number, y: number, z: number, width: number, span: number, verge: number): void {
+    for (const side of [-1, 1]) {
+      box(this.stage, 'jungle', x + side * (width / 2 + verge / 2), y - 0.3, z, verge, span + 0.35);
+    }
+  }
+
   /** Kerbs down both edges of a stretch. Under one step height, so rideable. */
   private railsAt(
     x: number,
@@ -784,12 +1398,12 @@ export class Route {
 
   /** Eased lateral position a fraction of the way through a stretch. */
   private lerpX(t: number): number {
-    const e = t * t * (3 - 2 * t);
+    const e = this.straight ? t : t * t * (3 - 2 * t);
     return this.x + (this.aimX - this.x) * e;
   }
 
   private lerpY(t: number): number {
-    const e = t * t * (3 - 2 * t);
+    const e = this.straight ? t : t * t * (3 - 2 * t);
     return this.y + (this.aimY - this.y) * e;
   }
 

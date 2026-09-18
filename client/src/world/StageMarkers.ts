@@ -1,4 +1,4 @@
-import { STAGES, formatSpeed } from '@evolve/shared';
+import { DECORATIONS, STAGES, formatSpeed } from '@evolve/shared';
 import { Group } from 'three';
 import { CanvasSign } from './CanvasSign.js';
 
@@ -48,16 +48,19 @@ export class StageMarkers {
         },
       ];
 
-      // Hung on the two posts the course data placed at the stage's entrance.
-      // Their exact positions come from the stage's own start, so a retuned
-      // stage carries its marker with it.
+      // Hung between the two posts the course data placed at the stage's
+      // entrance, read back from that data. It used to be placed off the WIN
+      // PAD's X - the far end of the stage - which only landed over the trail
+      // while the pad's spur happened to be the right length.
+      const posts = DECORATIONS.filter(
+        (d) => d.kind === 'marker' && d.stage === stage.index && Math.abs(d.z - (stage.startZ + 14)) < 0.5,
+      );
+      const x = posts.length > 0 ? posts.reduce((sum, d) => sum + d.x, 0) / posts.length : stage.winPadX;
+      const y = posts[0]?.y ?? stage.winPadY;
       for (const facing of [0, Math.PI]) {
         const sign = new CanvasSign(21, 8, lines);
-        sign.mesh.position.set(
-          facing === 0 ? stage.winPadX + 26 : stage.winPadX - 2,
-          stage.winPadY + 11,
-          stage.startZ + 14,
-        );
+        // Back to back, a hair apart, so each face is seen only from its side.
+        sign.mesh.position.set(x, y + 11, stage.startZ + 14 + (facing === 0 ? 0.05 : -0.05));
         sign.mesh.rotation.y = facing;
         this.root.add(sign.mesh);
         this.signs.push(sign);

@@ -80,21 +80,23 @@ export interface StageAwardedMessage {
 }
 
 /**
- * Server -> client: a batch of Speed the server has already credited.
+ * Server -> client: ONE step's worth of Speed, already credited.
  *
- * Always a WHOLE number of steps at ONE per-step value, so the popup can print
- * exactly what was paid: `steps` x `perStep`, where `perStep` is
- * `calculateSpeedGain(...).gain` at the moment of payment. A batch never mixes
- * two rates - the server sends what it has the instant the rate changes.
+ * One message is one award is one step. `gain` is exactly
+ * `calculateSpeedGain(...).gain` for the player at that moment - never a sum
+ * of several steps, and never multiplied by a count. The message used to
+ * carry a batch (`steps` x `perStep`), and the step count - how many strides
+ * happened to complete inside one server tick - is what players read as a
+ * changing multiplier: "1.06 x 5", "1.06 x 8".
  */
 export interface SpeedAwardedMessage {
-  /** Whole steps paid in this batch, the jump bonus included. */
-  steps: number;
-  /** Of `steps`, how many were the leave-the-ground bonus. */
-  jumpSteps: number;
-  /** What each one of those steps was worth. */
-  perStep: number;
-  /** The authoritative lifetime total once this batch had been added. */
+  /** The Speed this one step paid. Identical for every step at one setup. */
+  gain: number;
+  /** The input (its sequence number) whose movement completed the step. */
+  seq: number;
+  /** What completed the step: riding, or a treadmill belt. */
+  source: 'stride' | 'belt';
+  /** The authoritative lifetime total once this step had been added. */
   total: number;
 }
 

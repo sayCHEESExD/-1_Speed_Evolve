@@ -112,16 +112,39 @@ export class WorldTextures {
   }
 
   /** The gold chequer of a stage finish pad. */
-  goldCheck(color: string, alt: string): Texture {
-    return this.cached(`gold:${color}:${alt}`, () => {
-      const size = 64;
+  /**
+   * The win plate: a two-tone checker of toy-brick squares, each carrying
+   * four studs. One repeat is 2 x 2 squares.
+   */
+  goldCheck(color: string, alt: string, stud: string): Texture {
+    return this.cached(`gold:${color}:${alt}:${stud}`, () => {
+      const size = 128;
+      const square = size / 2;
       const ctx = context(size);
-      ctx.fillStyle = color;
-      ctx.fillRect(0, 0, size, size);
-      ctx.fillStyle = alt;
-      for (let y = 0; y < size; y += 32) {
-        for (let x = 0; x < size; x += 32) {
-          if (((x + y) / 32) % 2 === 0) ctx.fillRect(x, y, 32, 32);
+      for (let y = 0; y < 2; y += 1) {
+        for (let x = 0; x < 2; x += 1) {
+          ctx.fillStyle = (x + y) % 2 === 0 ? color : alt;
+          ctx.fillRect(x * square, y * square, square, square);
+        }
+      }
+      // Studs: a shadow ring, the stud, and a highlight, four to a square.
+      const radius = square * 0.16;
+      for (let y = 0; y < 4; y += 1) {
+        for (let x = 0; x < 4; x += 1) {
+          const cx = (x + 0.5) * (square / 2);
+          const cy = (y + 0.5) * (square / 2);
+          ctx.fillStyle = 'rgba(120,45,0,0.35)';
+          ctx.beginPath();
+          ctx.arc(cx + 1.5, cy + 2, radius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = stud;
+          ctx.beginPath();
+          ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = 'rgba(255,240,200,0.55)';
+          ctx.beginPath();
+          ctx.arc(cx - radius * 0.3, cy - radius * 0.3, radius * 0.35, 0, Math.PI * 2);
+          ctx.fill();
         }
       }
       return ctx.canvas;

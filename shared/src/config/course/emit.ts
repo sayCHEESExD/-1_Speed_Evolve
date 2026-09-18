@@ -204,6 +204,7 @@ export const hazard = (
     fromY?: number;
     toY?: number;
     driftX?: number;
+    spanX?: number;
   },
 ): CourseHazard => {
   const entry: CourseHazard = {
@@ -221,6 +222,7 @@ export const hazard = (
     fromY: fields.fromY ?? fields.y,
     toY: fields.toY ?? fields.y,
     driftX: fields.driftX ?? 0,
+    spanX: fields.spanX ?? 0,
   };
   hazards.push(entry);
   return entry;

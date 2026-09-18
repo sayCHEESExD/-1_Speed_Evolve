@@ -8,8 +8,23 @@ export interface ServerConfig {
   readonly tickRate: number;
   /** Milliseconds between state patches sent to clients. */
   readonly patchRateMs: number;
-  /** Directory holding persisted player profiles. */
+  /**
+   * Directory holding the JSON dev store, and any legacy `profiles.json` the
+   * Mongo store imports on boot.
+   */
   readonly dataDir: string;
+  /**
+   * The managed MongoDB Legion injects into every backend pod, or '' for none.
+   * Set: progress lives in Mongo. Unset: the JSON files in `dataDir`.
+   */
+  readonly mongoUri: string;
+  /**
+   * This game's slug, as Bloxity knows it. Legion injects `BLOXITY_GAME_ID`;
+   * the fallback is the slug the client initialises the SDK with. Sent with
+   * every token verification, and Bloxity refuses a token minted for a
+   * different game.
+   */
+  readonly gameSlug: string;
   /**
    * Shared secret for the Bloxity fulfilment webhook, or '' to accept any.
    *
@@ -55,6 +70,8 @@ export const serverConfig: ServerConfig = {
   // Relative to the server package, which is the working directory for both
   // `npm run dev` and `npm start`, so a restart finds the same file either way.
   dataDir: resolve(process.env['EVOLVE_DATA_DIR'] ?? 'data'),
+  mongoUri: process.env['MONGODB_URI'] ?? '',
+  gameSlug: process.env['BLOXITY_GAME_ID'] || 'speed-evolve',
   buxWebhookSecret: process.env['BLOXITY_WEBHOOK_SECRET'] ?? '',
   logSpeedAwards: process.env['EVOLVE_LOG_SPEED'] === '1',
 };

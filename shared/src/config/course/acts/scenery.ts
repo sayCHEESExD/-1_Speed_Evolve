@@ -1,4 +1,4 @@
-import { block, decorate, groundDuringBuild, hazard, movers, pit, solids } from '../emit.js';
+import { block, cave, decorate, groundDuringBuild, hazard, movers, pit, solids } from '../emit.js';
 import type { Route } from '../route.js';
 import type { DecorationKind } from '../types.js';
 
@@ -29,7 +29,12 @@ export interface ScatterOptions {
   readonly ruins?: number;
   /** True to add a high canopy layer over the route. */
   readonly canopy?: boolean;
-  /** How far out from the route's centre the planting starts. */
+  /**
+   * How far beyond the route's EDGE the planting starts, wherever the edge is
+   * at that Z. Measured from the edge rather than the centre because the
+   * route is wide and wanders: a fixed distance from the centre line put
+   * trees on a twenty-eight-wide trail.
+   */
   readonly inset?: number;
   /** How far out it reaches. */
   readonly reach?: number;
@@ -78,8 +83,8 @@ export const scatterJungle = (
   options: ScatterOptions = {},
 ): void => {
   const density = options.density ?? 1;
-  const inset = options.inset ?? 16;
-  const reach = options.reach ?? 46;
+  const inset = options.inset ?? 3;
+  const reach = options.reach ?? 40;
   const palms = options.palms ?? 0.22;
   const fallen = options.fallen ?? 0.18;
   const ruins = options.ruins ?? 0;
@@ -92,10 +97,11 @@ export const scatterJungle = (
     const c = r.next();
     const side = i % 2 === 0 ? 1 : -1;
     const z = fromZ + a * length;
-    // Placed off the CURSOR'S line rather than off world zero, so a stage that
-    // curves keeps its planting beside the path instead of drifting into it.
-    const x = r.x + side * (inset + b * reach);
-    const y = standOn(x, z, r.y, options.drop ?? 60);
+    // Placed off the route's OWN line at this Z, so a stage that curves keeps
+    // its planting beside the path instead of drifting into it.
+    const line = r.lineAt(z) ?? { x: r.x, y: r.y, half: r.width / 2 };
+    const x = line.x + side * (line.half + inset + b * reach);
+    const y = standOn(x, z, line.y, options.drop ?? 60);
     if (y === null) continue;
 
     let kind: DecorationKind = 'tree';
@@ -111,9 +117,10 @@ export const scatterJungle = (
     for (let j = 0; j < 2; j += 1) {
       const fa = r.next();
       const fb = r.next();
-      const fx = r.x + side * (inset * 0.55 + fa * reach);
       const fz = fromZ + fb * length;
-      const fy = standOn(fx, fz, r.y, options.drop ?? 60);
+      const fline = r.lineAt(fz) ?? line;
+      const fx = fline.x + side * (fline.half + 1.5 + fa * reach);
+      const fy = standOn(fx, fz, fline.y, options.drop ?? 60);
       if (fy === null) continue;
       decorate(
         stage,
@@ -132,9 +139,10 @@ export const scatterJungle = (
   for (let i = 0; i < Math.round(count * 0.4); i += 1) {
     const a = r.next();
     const side = i % 2 === 0 ? 1 : -1;
-    const rx = r.x + side * (inset * 0.7);
     const rz = fromZ + a * length;
-    const ry = standOn(rx, rz, r.y, options.drop ?? 60);
+    const rline = r.lineAt(rz) ?? { x: r.x, y: r.y, half: r.width / 2 };
+    const rx = rline.x + side * (rline.half + 1.2);
+    const ry = standOn(rx, rz, rline.y, options.drop ?? 60);
     if (ry === null) continue;
     decorate(stage, 'root', rx, ry - 0.2, rz, 0.9 + a * 0.7, side > 0 ? 0.6 : -0.6, i % 2);
   }
@@ -145,8 +153,13 @@ export const scatterJungle = (
     for (let i = 0; i < Math.round(count * 0.5); i += 1) {
       const a = r.next();
       const b = r.next();
-      decorate(stage, 'tree', r.x + (b - 0.5) * 70, r.y + 22 + a * 14, fromZ + a * length, 1.8 + b, a * 6.28, 1);
-      decorate(stage, 'vine', r.x + (b - 0.5) * 44, r.y + 20, fromZ + b * length, 1 + a, 0, i % 3);
+      const cz = fromZ + a * length;
+      const cline = r.lineAt(cz) ?? { x: r.x, y: r.y, half: r.width / 2 };
+      const side = b < 0.5 ? -1 : 1;
+      decorate(stage, 'tree', cline.x + side * (cline.half + 4 + b * 20), cline.y + 22 + a * 14, cz, 1.8 + b, a * 6.28, 1);
+      const vz = fromZ + b * length;
+      const vline = r.lineAt(vz) ?? cline;
+      decorate(stage, 'vine', vline.x + side * (vline.half + 1), vline.y + 20, vz, 1 + a, 0, i % 3);
     }
   }
 };
@@ -177,6 +190,18 @@ export const streamUnder = (r: Route, width: number): void => {
  * cliff face through a landing. Everything that has to stand BESIDE the route
  * asks this instead. Returns null over a slice with no ground at all.
  */
+/**
+ * Solids that stand BESIDE the route rather than being it: a colonnade's
+ * shafts and the caps on them. Registered by whatever lays them, and skipped
+ * by `routeAt`, so scenery never measures the route off other scenery.
+ *
+ * A SET, not a shape test. "Anything with a footprint of nine by nine or
+ * less" also described every tread of a rail-edged path laid in short runs -
+ * stage twenty-seven's whole route - and with the route invisible its cliff
+ * face fell back to the cursor and stood across the path.
+ */
+const furniture = new WeakSet<object>();
+
 export const routeAt = (
   stage: number,
   z0: number,
@@ -193,7 +218,9 @@ export const routeAt = (
   };
   for (const solid of solids) {
     if (solid.stage !== stage || solid.maxY - solid.minY > 30) continue;
-    if (solid.kind === 'ruin' && solid.maxX - solid.minX < 9 && solid.maxY - solid.minY > 8) continue;
+    // Counting a column's cap as the route's height is how a row of statues
+    // ended up standing on the colonnade's roofline.
+    if (furniture.has(solid)) continue;
     consider(solid.minX, solid.maxX, solid.minZ, solid.maxZ, solid.maxY);
   }
   for (const mover of movers) {
@@ -308,9 +335,9 @@ export const colonnade = (
       const shear = r.next() < broken ? 0.35 + r.next() * 0.4 : 1;
       const edge = side > 0 ? here.right : here.left;
       const x = side > 0 ? Math.max(centre + offset, edge + Math.max(3, margin) + 2.6) : Math.min(centre - offset, edge - Math.max(3, margin) - 2.6);
-      block(r.stage, 'ruin', x - 2.6, here.top, z - 2.6, 5.2, height * shear, 5.2);
+      furniture.add(block(r.stage, 'ruin', x - 2.6, here.top, z - 2.6, 5.2, height * shear, 5.2));
       if (shear > 0.95) {
-        block(r.stage, 'ruin', x - 4, here.top + height, z - 4, 8, 3.4, 8);
+        furniture.add(block(r.stage, 'ruin', x - 4, here.top + height, z - 4, 8, 3.4, 8));
       }
       if (i % 3 === 0) {
         decorate(r.stage, 'vine', x, here.top + height * shear, z, 1.1, 0, i % 3);
@@ -345,11 +372,13 @@ export const torchlight = (r: Route, length: number, spacing = 22): void => {
 
 /** An abandoned camp beside the route: the last expedition got this far. */
 export const abandonedCamp = (r: Route, z: number, side: 1 | -1): void => {
-  const x = r.x + side * (r.width / 2 + 13);
-  decorate(r.stage, 'tent', x, r.y, z, 1.2, r.next() * 6.28, 2);
-  decorate(r.stage, 'crates', x + side * 5, r.y, z + 7, 1, r.next() * 6.28, 1);
-  decorate(r.stage, 'torch', x - side * 4, r.y, z - 5, 1, 0, 0);
-  decorate(r.stage, 'stele', x + side * 8, r.y, z - 9, 1.1, 0, 0);
+  const line = r.lineAt(z) ?? { x: r.x, y: r.y, half: r.width / 2 };
+  const x = line.x + side * (line.half + 9);
+  const y = line.y;
+  decorate(r.stage, 'tent', x, y, z, 1.2, r.next() * 6.28, 2);
+  decorate(r.stage, 'crates', x + side * 5, y, z + 7, 1, r.next() * 6.28, 1);
+  decorate(r.stage, 'torch', x - side * 4, y, z - 5, 1, 0, 0);
+  decorate(r.stage, 'stele', x + side * 8, y, z - 9, 1.1, 0, 0);
 };
 
 
@@ -368,8 +397,39 @@ export const scatterCave = (r: Route, stage: number, length = r.z - r.startZ): v
     const b = r.next();
     const side = i % 2 === 0 ? 1 : -1;
     const z = fromZ + a * length;
-    const x = r.x + side * (5 + b * 7);
-    decorate(stage, b < 0.55 ? 'mushroom' : 'rock', x, r.y - 1, z, 0.7 + b * 0.8, a * 6.28, i % 3);
-    if (b > 0.82) decorate(stage, 'vine', x, r.y + 9, z, 0.8 + a * 0.5, 0, i % 3);
+    const line = r.lineAt(z) ?? { x: r.x, y: r.y, half: r.width / 2 };
+    // Against the cave wall, which stands three units back from the floor's
+    // edge: never on the floor itself.
+    const x = line.x + side * (line.half + 1 + b * 1.5);
+    decorate(stage, b < 0.55 ? 'mushroom' : 'rock', x, line.y - 1, z, 0.7 + b * 0.8, a * 6.28, i % 3);
+    if (b > 0.82) decorate(stage, 'vine', x, line.y + 9, z, 0.8 + a * 0.5, 0, i % 3);
   }
+};
+
+/**
+ * Roof and wall in a stretch that has ALREADY been laid, turning it into a
+ * cave (or a temple passage).
+ *
+ * The obstacles come first and the rock goes round them, so a cave can hold
+ * anything the open trail can - rolling boulders, crushers, quicksand, a
+ * lift over a chasm - instead of only the bare floor `Route.tunnel` lays.
+ * Follows the route's own line at every Z, three units back from its edge.
+ */
+export const enclose = (
+  r: Route,
+  fromZ: number,
+  options: { headroom?: number; kind?: 'cave' | 'stone' | 'ruin'; dark?: number } = {},
+): void => {
+  const headroom = options.headroom ?? 16;
+  const kind = options.kind ?? 'cave';
+  const span = 7;
+  for (let z = fromZ; z < r.z; z += span) {
+    const line = r.lineAt(z + span / 2);
+    if (!line) continue;
+    const inner = line.half + 3;
+    block(r.stage, kind, line.x - inner - 8, line.y + headroom, z, inner * 2 + 16, 7, span + 0.4);
+    block(r.stage, kind, line.x - inner - 8, line.y - 4, z, 8, headroom + 4, span + 0.4);
+    block(r.stage, kind, line.x + inner, line.y - 4, z, 8, headroom + 4, span + 0.4);
+  }
+  if (kind === 'cave') cave(r.stage, fromZ - 4, r.z + 4, options.dark ?? 0.85);
 };

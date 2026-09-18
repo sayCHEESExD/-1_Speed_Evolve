@@ -142,8 +142,37 @@ and the Colyseus server runs as a long-lived Node process elsewhere
 
 - `VITE_SERVER_URL` is the ONLY client-side server configuration, and it is
   baked in at build time.
-- `EVOLVE_DATA_DIR` should point at a mounted volume, or a redeploy wipes every
-  player's progression.
+- `MONGODB_URI` (Legion injects it) puts progress in MongoDB. Without it the
+  server uses JSON files in `EVOLVE_DATA_DIR`, which should then be a mounted
+  volume or a redeploy wipes them.
 - `BLOXITY_WEBHOOK_SECRET` verifies the Bux webhook when set.
+
+### Player progress
+
+Signed-in Bloxity players keep their progress on their ACCOUNT - every
+browser, every device, and through restarts, scale-to-zero and deploys. Guests
+keep it in their browser, exactly as before.
+
+- **Storage.** With `MONGODB_URI` set (Legion sets it: an isolated database
+  per game and channel) progress is in MongoDB, one document per player.
+  Without it, JSON files in `EVOLVE_DATA_DIR` - the dev store.
+- **Identity.** The client sends its Bloxity portal TOKEN - never an account
+  id - with the join, and again whenever the login changes. The server asks
+  Bloxity who it belongs to (`POST https://api.bloxity.io/v1/auth/game-token/verify`,
+  the same call the SDK makes); only a verified account is ever loaded as one.
+  If Bloxity cannot answer, the player is let in as a guest and verified again
+  shortly.
+- **First login** carries this browser's guest progress into an account that
+  has none. An account that already has progress always wins.
+- **Purchases** are recorded durably against the account Bloxity says paid,
+  before the webhook answers 2xx, and pay out exactly once.
+- **Storage down** means joins are refused - never let in on an empty profile -
+  and the client's retry brings players in once it is back. `/health` keeps
+  answering throughout.
+
+`npm run verify:persistence` proves all of this end to end against the built
+server, the JSON store, and a MongoDB it starts and stops itself (set
+`MONGOD_BIN`, or keep a binary in `~/.cache/mongodb-binaries`). With
+`MONGODB_URI` set it ALSO runs against that database - and WIPES it.
 
 See `CLAUDE.md` for the design constraints this project is built under.

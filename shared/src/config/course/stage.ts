@@ -25,11 +25,21 @@ let cursorY: number = COURSE.floorY;
 /**
  * How wide the path is at the start of a stage, by act.
  *
- * Narrow from the first act and narrower every act after. These used to run
- * from twenty-six down to thirteen, which with the forest floor laid either
- * side made the first half of the course a road.
+ * WIDE, and it stays wide. The course before this one ran eleven down to six
+ * and a half, and felt like riding along a snake's back through the jungle:
+ * the only difficulty it could express was less floor. This one gives the
+ * player room to run, jump, dodge and recover, and asks for skill with what
+ * is IN the way - boulders, logs, gates, quicksand, things that move. It
+ * narrows a little act by act because the ruins and the temple are built
+ * spaces, not because a thin floor is a challenge.
  */
-const ENTRY_WIDTH = [11, 9, 8, 7.5, 7, 6.5];
+const ENTRY_WIDTH = [22, 20, 20, 18, 18, 18];
+
+/**
+ * The jungle verge either side of the path, by act: undergrowth to the edge
+ * of the trail outdoors, and none in the masonry of the ruins and the temple.
+ */
+const ENTRY_VERGE = [3, 3, 0, 2, 0, 2];
 
 export interface StageBuild {
   /** Called with a cursor at the stage's first metre. */
@@ -56,15 +66,17 @@ export const defineStage = (index: number, build: (route: Route) => void): void 
     x: cursorX,
     y: cursorY,
     z: startZ,
-    width: ENTRY_WIDTH[act - 1] ?? 16,
+    width: ENTRY_WIDTH[act - 1] ?? 18,
   });
+  route.verge = ENTRY_VERGE[act - 1] ?? 0;
 
   // The approach: solid ground, the carved marker, and the act's own material
   // under the player's feet before anything is asked of them.
   route.made(act >= 3 ? 'stone' : 'dirt');
-  route.path(COURSE.stageGap, { width: route.width + 4 });
-  decorate(index, 'marker', route.side(-(route.width / 2 + 6)), route.y, startZ + 14, 1.4, 0, act);
-  decorate(index, 'marker', route.side(route.width / 2 + 6), route.y, startZ + 14, 1.4, Math.PI, act);
+  route.path(COURSE.stageGap);
+  const posts = route.fullWidth() / 2 + 4;
+  decorate(index, 'marker', route.side(-posts), route.y, startZ + 14, 1.4, 0, act);
+  decorate(index, 'marker', route.side(posts), route.y, startZ + 14, 1.4, Math.PI, act);
 
   build(route);
 
@@ -79,17 +91,15 @@ export const defineStage = (index: number, build: (route: Route) => void): void 
    * route itself travels, so passing through costs nothing and claiming is a
    * deliberate steer.
    */
-  const apron = Math.max(route.width + 4, 14);
+  const apron = Math.max(route.fullWidth(), 14);
   const spur = apron / 2 + WIN_PAD.width / 2 + 3;
   route.aimAt(route.x).riseTo(route.y);
-  route.path(30, { width: apron + WIN_PAD.width + 8, kind: act >= 3 ? 'stone' : 'dirt' });
+  route.path(30, { width: apron + WIN_PAD.width + 8, verge: 0, kind: act >= 3 ? 'stone' : 'dirt' });
 
   const padX = route.x - spur;
   const padZ = route.z - 15;
   const padY = route.y + WIN_PAD.height;
   box(index, 'winPad', padX, padY, padZ, WIN_PAD.width, WIN_PAD.length, WIN_PAD.height);
-  decorate(index, 'torch', padX - WIN_PAD.width / 2 - 2, route.y, padZ, 1.1, 0, 0);
-  decorate(index, 'torch', padX + WIN_PAD.width / 2 + 2, route.y, padZ, 1.1, 0, 0);
 
   route.layPit();
 

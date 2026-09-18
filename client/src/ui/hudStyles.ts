@@ -876,6 +876,9 @@ body.aoe-touch-mode .aoe-plate__name { font-size: 12px; }
 .aoe-pop__value {
   font-size: clamp(16px, 2vw, 29px);
   line-height: 1;
+  /* "+6 Speed" is one reading; a popup near the right of its band must not
+   * fold it into two lines. */
+  white-space: nowrap;
   color: #fff;
   text-shadow:
     3px 0 0 var(--aoe-ink), -3px 0 0 var(--aoe-ink),

@@ -55,6 +55,12 @@ export class PlayerState extends Schema {
    */
   @type('boolean') jumpLatched = false;
   @type('float32') coyote = 0;
+  /**
+   * How deep the mount has sunk into quicksand. Replicated for the same
+   * reason: replay that resumed at a different depth would put the mount at a
+   * different height on the very next step.
+   */
+  @type('float32') sink = 0;
 
   /** Monotonic counts, so a remote client can trigger one-shot animations. */
   @type('uint32') jumpCount = 0;

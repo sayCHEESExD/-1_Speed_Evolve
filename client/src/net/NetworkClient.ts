@@ -7,6 +7,8 @@ import {
   type RespawnMessage,
   type SetAvatarMessage,
   type SetIdentityMessage,
+  type AuthMessage,
+  type GuestIdMessage,
   type SpeedAwardedMessage,
   type StageAwardedMessage,
 } from '@evolve/shared';
@@ -48,7 +50,10 @@ const sleep = (ms: number): Promise<void> =>
   });
 
 /**
- * A stable id for this browser, so progression survives a reload.
+ * A stable id for this browser, so a GUEST's progression survives a reload.
+ *
+ * A signed-in player's progress lives on their Bloxity account instead, found
+ * by a token the server verifies; this id is only ever the guest's.
  *
  * Falls back to a throwaway id when storage is unavailable (private windows,
  * blocked site data) - the session still works, it just will not be restored.
@@ -102,14 +107,19 @@ export class NetworkClient {
   private status: ConnectionStatus = 'idle';
 
   /**
-   * Who this browser is on Bloxity, asked at join time.
+   * The Bloxity portal TOKEN, asked for at join time and whenever the login
+   * changes. Never an account id: the server asks Bloxity who the token
+   * belongs to, and that answer is the only thing that names an account.
    *
-   * A CALLBACK rather than a stored id: the account can change between one
-   * join and the next, and a value captured at construction would send the
-   * previous player's id after a logout. Kept as a plain function so `net/`
-   * still imports nothing from the portal layer.
+   * A CALLBACK rather than a stored value, because the login can change
+   * between one join and the next. A plain function so `net/` still imports
+   * nothing from the portal layer.
    */
-  private identity: (() => string | null) | null = null;
+  private token: (() => string | null) | null = null;
+  /** The token the room was last told about - with the join or since - for dedupe. */
+  private sentToken: string | null = null;
+  /** This browser's guest id, which the server may replace. */
+  private playerId: string | null = null;
   /** The public name and portrait to join with. Null for none. */
   private profile: (() => SetIdentityMessage | null) | null = null;
 
@@ -142,8 +152,22 @@ export class NetworkClient {
     this.room?.send(MessageType.SetAvatar, message);
   }
 
-  setIdentityProvider(provider: () => string | null): void {
-    this.identity = provider;
+  /** Where the room should get the portal token from, if there is one. */
+  setTokenProvider(provider: () => string | null): void {
+    this.token = provider;
+  }
+
+  /**
+   * Tell the room the portal login changed - a sign-in, a sign-out or a
+   * different account. The server switches the LIVE session onto the right
+   * profile. Unchanged tokens are not re-sent.
+   */
+  syncAuth(): void {
+    if (!this.room) return;
+    const token = this.token?.() ?? null;
+    if (token === this.sentToken) return;
+    this.sentToken = token;
+    this.room.send(MessageType.Auth, { token } satisfies AuthMessage);
   }
 
   /** Where the room should get the player's public name and portrait from. */
@@ -207,17 +231,19 @@ export class NetworkClient {
     logger.info(SCOPE, `joining "${ROOM_NAME}" at ${clientConfig.serverUrl}`);
 
     this.client ??= new Client(clientConfig.serverUrl);
-    const playerId = resolvePlayerId();
+    this.playerId ??= resolvePlayerId();
     const attempts = JOIN_BACKOFF_MS.length + 1;
 
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       try {
         const profile = this.profile?.() ?? null;
+        const token = this.token?.() ?? null;
         this.room = await this.client.joinOrCreate<NetCourseState>(ROOM_NAME, {
-          playerId,
-          // Optional: a signed-out player simply has none, and the room falls
-          // back to the browser-stored id exactly as it always did.
-          bloxityId: this.identity?.() ?? undefined,
+          playerId: this.playerId,
+          // The portal token when signed in. The server verifies it with
+          // Bloxity; without one - or with one Bloxity rejects - this browser
+          // plays as the guest `playerId` names.
+          token: token ?? undefined,
           // Sent with the join rather than after it, so players already in the
           // room draw this one correctly from their very first patch.
           avatar: this.look?.() ?? undefined,
@@ -227,6 +253,7 @@ export class NetworkClient {
           name: profile?.name || undefined,
           pfp: profile?.pfp || undefined,
         });
+        this.sentToken = token;
         break;
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
@@ -249,6 +276,8 @@ export class NetworkClient {
 
     this.bindRoom(this.room);
     this.setStatus('connected');
+    // A login that changed while the join was in flight.
+    this.syncAuth();
     logger.info(
       SCOPE,
       `joined roomId=${this.room.roomId} sessionId=${this.room.sessionId}`,
@@ -406,6 +435,20 @@ export class NetworkClient {
 
     $(room.state).players.onRemove((_player, sessionId) => {
       this.handlers.onPlayerRemoved?.(sessionId);
+    });
+
+    room.onMessage<GuestIdMessage>(MessageType.GuestId, (message) => {
+      // This browser's old guest id was migrated into an account and is kept
+      // as a recovery copy; guest play continues under the id the server
+      // chose, so nothing ever saves over it.
+      const next = typeof message?.playerId === 'string' ? message.playerId : '';
+      if (!next) return;
+      this.playerId = next;
+      try {
+        window.localStorage.setItem(PLAYER_ID_KEY, next);
+      } catch {
+        /* storage blocked: the id still holds for this page */
+      }
     });
 
     room.onMessage<RespawnMessage>(MessageType.Respawn, (message) => {

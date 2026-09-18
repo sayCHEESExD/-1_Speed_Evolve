@@ -202,6 +202,33 @@ const smartJump = (m, time, ctx) => {
   return landsOn(0) && !landsOn(DT * 2);
 };
 
+/**
+ * The skilled rider's other jump: OVER something.
+ *
+ * A log rolling down at it, an arm sweeping round, a swinging trunk. When
+ * running on would meet a hazard within a moment, and a jump started now
+ * would carry the mount over it, jump - which is exactly what a person does
+ * when a log is about to hit them.
+ */
+const hazardJump = (m, time, ctx) => {
+  if (!m.grounded) return false;
+  const soon = 0.4;
+  let danger = false;
+  for (let t = 0; t <= soon; t += DT * 2) {
+    if (collision.touchesHazard(m.x + m.vx * t, m.y, m.z + m.vz * t, time + t)) {
+      danger = true;
+      break;
+    }
+  }
+  if (!danger) return false;
+  const air = (2 * ctx.jumpVelocity) / G;
+  for (let t = DT; t <= air; t += DT * 2) {
+    const y = m.y + ctx.jumpVelocity * t - (G * t * t) / 2;
+    if (collision.touchesHazard(m.x + m.vx * t, y, m.z + m.vz * t, time + t)) return false;
+  }
+  return true;
+};
+
 const events = { jumpStarted: false, landed: false };
 
 /** Step once with an input; returns 'fell' | 'hazard' | null. */
@@ -226,15 +253,26 @@ const PLANS = [
   { name: 'wait-longer', open: 150, moveZ: 0, jumpNow: false },
   { name: 'wait-cycle', open: 240, moveZ: 0, jumpNow: false },
   { name: 'back', open: 24, moveZ: -1, jumpNow: false },
+  // Sidesteps. The course is WIDE, and on a wide trail the fair answer to a
+  // boulder in your lane is to move out of it - so the planner can drift
+  // across while it runs on, or while it holds back.
+  { name: 'left', open: 30, moveZ: 1, jumpNow: false, lateral: 1 },
+  { name: 'right', open: 30, moveZ: 1, jumpNow: false, lateral: -1 },
+  { name: 'left-hold', open: 30, moveZ: 0.3, jumpNow: false, lateral: 1 },
+  { name: 'right-hold', open: 30, moveZ: 0.3, jumpNow: false, lateral: -1 },
 ];
 const REPLAN = 3;
 
 const planInput = (plan, k, m, ctx, time) => {
   if (k < plan.open) {
+    // +X is the camera's LEFT at yaw 0, and moving there is a NEGATIVE moveX.
+    if (plan.lateral) return { moveX: -plan.lateral, moveZ: plan.moveZ, jump: false, cameraYaw: 0 };
     if (plan.jumpNow) return followInput(m, ctx, time, { moveZ: 1, jump: true });
     return followInput(m, ctx, time, { moveZ: plan.moveZ, jump: false });
   }
-  const jump = ctx.style === 'edge' ? atEdge(m, time, ctx.reach) : smartJump(m, time, ctx);
+  const jump =
+    (ctx.style === 'edge' ? atEdge(m, time, ctx.reach) : smartJump(m, time, ctx)) ||
+    hazardJump(m, time, ctx);
   return followInput(m, ctx, time, { moveZ: 1, jump: jump && k % 2 === 0 });
 };
 
@@ -285,8 +323,8 @@ const evaluate = (plan, m, ctx, params, t0) => {
 
 const better = (a, b) => {
   if (a.outcome.cls !== b.outcome.cls) return a.outcome.cls > b.outcome.cls;
-  const aWaits = a.plan.moveZ !== 1;
-  const bWaits = b.plan.moveZ !== 1;
+  const aWaits = a.plan.moveZ !== 1 || a.plan.lateral !== undefined;
+  const bWaits = b.plan.moveZ !== 1 || b.plan.lateral !== undefined;
   if (aWaits !== bWaits) return !aWaits;
   return a.outcome.progress > b.outcome.progress + 0.5;
 };

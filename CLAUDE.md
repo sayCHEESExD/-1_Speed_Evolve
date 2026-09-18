@@ -87,7 +87,9 @@ on purpose. `verify:progression` asserts both halves of this.
 ## Progression
 
 - **Speed** is the currency. Players farm it by riding: distance the SERVER
-  observes, plus a bonus each time the mount leaves the ground.
+  observes, and nothing else. There is NO jump bonus - leaving the ground used
+  to pay two extra steps, a second and occasional source of Speed beside the
+  one every step pays.
 - **Speed is paid in WHOLE STEPS at ONE rate.** `calculateSpeedGain` in
   `shared/src/config/speed.ts` is the only calculation of what a step is
   worth: `Base (pad) x Animal x Training (belt) x Items x Trail x Aura x
@@ -96,23 +98,41 @@ on purpose. `verify:progression` asserts both halves of this.
   stage Wins, not Speed - and is listed so nobody "fixes" it by multiplying an
   item in. `totalMultiplier` and `speedPerStep` are views onto it, not
   formulas.
-- `SpeedService` banks distance in a per-player `carry` and pays one step for
-  every `strideDistance` crossed; the remainder waits for the next tick. It
-  used to pay `distance / stride x rate` per tick - a FRACTION of a step, sized
-  by how far the mount happened to move between two messages - which turned
-  one constant rate into "+14, +15, +17, +8". A jump pays `jumpBonusSteps`
-  more steps at the same rate. Every payment is therefore `steps x rate`, and
-  `verify:progression` rides five setups through irregular frames and checks
-  every single payment against the breakdown.
-- **The popups print what the server PAID** (`MessageType.SpeedAwarded`: a
-  step count and the per-step value, batched once per tick and never mixing two
-  rates). They used to diff the replicated total between patches and release
-  whatever had piled up on a timer, which is the other half of how a constant
-  rate came out random. A popup shows the per-step figure and a count -
-  "+125", "+125 x3" - never a sum, and never at a random size.
+- A STEP is the unit the RATE is quoted in - `strideDistance` (2) world
+  units, the pad's "+1/Steps" - and a FOOTFALL is the unit it is PAID in:
+  `SPEED.footfallSteps` (6) steps, `FOOTFALL_DISTANCE` (12) units.
+  `SpeedService` banks distance in a per-player `carry` and pays one footfall
+  for every `FOOTFALL_DISTANCE` crossed; the remainder waits for the next
+  input, and survives a respawn, because it is distance the server watched
+  being ridden. It used to pay `distance / stride x rate` per tick - a
+  FRACTION of a step, sized by how far the mount happened to move between two
+  messages - which turned one constant rate into "+14, +15, +17, +8".
+- **ONE FOOTFALL IS ONE AWARD IS ONE POPUP.** `credit` returns a LIST of
+  awards, each exactly `footfallSpeedGain(calculateSpeedGain(...))` - the
+  step gain times the steps in a footfall, summed ONCE on the server - and
+  each added to the total on its own; `CourseRoom` sends one `SpeedAwarded`
+  message per award (the gain, the input `seq` that completed it, and the
+  total after it); `SpeedPopups` draws one "+6 Speed" per message with that
+  figure and nothing beside it.
+- **Never announce a single step.** The third version paid and sent every
+  two-unit step as its own award: nineteen a second at level twelve, sixty at
+  the top of the curve, and one stride of the mount's legs came out as twenty
+  "+1" popups. The Speed was right; the unit was a sliver of a stride.
+  `footfallSteps` changes how OFTEN Speed arrives and never how much a unit
+  of distance pays - `verify:progression` checks both.
+- **Never batch awards into a count.** The second version did: the room
+  bundled the steps completed in each tick into `steps x perStep`, and the
+  popup merged each quarter-second of those into "+1.06 x5", "+1.06 x8". The
+  per-step value never moved - a server trace over two hundred and thirty-nine
+  consecutive awards showed `1.04` every time - but the COUNT, which only said
+  how far the mount had moved in the window, read as a multiplier that kept
+  changing. How many steps a second a player earns depends on how fast they
+  ride; what ONE step is worth depends on nothing but their setup.
 - The server logs the breakdown (`Base -> Animal -> ... -> Final Gain`)
-  whenever a player's rate changes; `EVOLVE_LOG_SPEED=1` also logs every
-  payment.
+  whenever a player's rate changes. `EVOLVE_LOG_SPEED=1` also logs every award
+  with the input that triggered it - its sequence number, frame time, the
+  distance it covered and the stride accumulator before and after - and every
+  message sent. That trace is what found the batching; it is off by default.
 - The level curve **COMPOUNDS**, and it has two halves. Up to `levelKnee` (9)
   a level costs `levelStep × L` - a flat 5, 10, 15 - and past it that same
   linear figure is multiplied by `levelGrowth` (1.06) once per level beyond
@@ -352,10 +372,11 @@ a line each, rather than being impossible.
   steps, which is both how a Roblox path looks and how an axis-aligned
   collision model stays exact.
 - **There is no floor.** What is beside the path is a river, a ravine or a
-  two-hundred-unit drop. The acts that happen on the ground ask for it with
-  `shoulders`, which lays a forest-floor apron either side; the acts from the
-  ruins onward leave it out, and that is most of where their difficulty comes
-  from.
+  two-hundred-unit drop. Act one's trails are RAISED THROUGH SWAMP: a three-
+  unit verge (`shoulders`) and then mud a few units down, lethal and visible
+  (`Route.fall` sets how far below the ground a kill volume's surface sits).
+  The old act laid walkable forest floor twenty-nine units out on both sides,
+  which made the first five stages a field with a stripe painted down it.
 - **Every stretch lays its own KILL VOLUME**, at `COURSE.fallDepth` below the
   lowest ground in it and spanning the valley. The cursor does it, not the
   author, so there is no such thing as a stretch of this course with a
@@ -372,9 +393,10 @@ a line each, rather than being impossible.
 
 Five stages an act, and each act must be recognisable from a single screenshot:
 
-1. **Jungle Entrance** - wide dirt trails through forest floor, shallow fords,
-   felled timber, the first climb, the first hazard. Deliberately forgiving:
-   every crossing is wider than the skill it teaches requires.
+1. **Jungle Entrance** - ten-wide dirt trails raised through swamp, fords,
+   felled timber, the first climb and shuttles, the first hazard. Forgiving:
+   no chain overshoots, and the first two stages let a rider who only steers
+   through.
 2. **Deep Jungle** - rapids, rope bridges over a gorge, a ledge behind a
    waterfall, a switchback climb up buttress roots, a ruined span.
 3. **Ancient Ruins** - cut stone, colossal statues with sweeping arms, turning
@@ -388,6 +410,79 @@ Five stages an act, and each act must be recognisable from a single screenshot:
 6. **Final Expedition** - a split path over a valley of roots, the largest
    waterfall in the world, a four-hundred-unit skybridge, a chase, and the
    summit temple.
+
+### Difficulty
+
+The course was a highway: paths up to twenty-six wide with forest floor
+beside them, plazas sixty to a hundred and twenty wide, and gaps sized in
+world units that were a quarter of a jump by the late game. A player could
+hold W and hammer jump through most of it. It was rebuilt stage by stage
+against the rules below, and `npm run verify:difficulty` holds it to them.
+
+- **Everything is a fraction of `Route.reach`** - how far a full-speed jump
+  carries at the stage's OWN recommended level, from the same movement curve
+  the game runs. Nine units is a jump at level one and a stride at level one
+  hundred and sixty; a quarter of a reach is the same ask at every stage.
+  `Route.jumpHeight` does the same for climbs.
+- **Widths narrow act by act**: about ten in act one, seven in act two, six and
+  a half from act three, down to five and a half in places in act six. Courts
+  and arenas are sixteen to sixty wide, never a field to ride round the edge of.
+- **`hops` is the precision primitive**: a chain of landings with a jump
+  between each. From act two, `gap + land` is LESS than a jump, so a jump from
+  the very edge overshoots - the player takes off early or eases off. Every
+  chain keeps `gap + 2 x land` at least 1.15 jumps, so there is always a
+  takeoff that works and the window is the landing's own length. Below that
+  margin the window vanishes and the chain is a lottery. `jog` is the whole
+  sideways step between neighbouring landings; keep it and `aim` together to
+  about a quarter of a hop's length, or the hop is a guess.
+- **Every crossing wider than a jump is crossed on something that moves** -
+  rafts, shuttles, lifts, turning stones, orbiting stones - so it is WAITED
+  for, and it has a ledge before it long enough to stop on.
+- **Moving landings are long enough to land on at speed**: about a third of a
+  jump from act five. A thirteen-unit lift is under the mount for a tenth of a
+  second at level one hundred and twenty.
+- **A lift works BELOW the ledges it joins.** One whose top rose above them
+  presented its side face to a rider in the air, and a mount that hits a side
+  face loses all its speed and drops short: a trap, not a timing.
+- **Collapsing spans leave a window** (`collapsing({ spread })`): the give-way
+  runs through part of the cycle and the span stands whole for the rest. A
+  span that always has one section down is never crossable.
+- **One arm, not two, on a spinner in a narrow court.** Two arms opposite each
+  other make a bar through the middle that never leaves the path clear for
+  long enough to cross.
+- **Hazards sit BESIDE the line where the line cannot move.** A lethal
+  waterfall over the outer half of a ledge leaves a lane; one over the middle
+  of a ledge narrower than itself leaves nothing (stage eight shipped that way
+  and could not be cleared).
+- **Nothing lands a rider somewhere it cannot leave.** Pillars that stones
+  orbit are scenery, not solids: a solid top far below the path is somewhere
+  a falling rider lands and is stranded rather than killed.
+- **Every stage must be rideable at ENDGAME SPEED.** There are no checkpoints,
+  so a player going for stage thirty rides stages one to twenty-nine at level
+  one hundred and sixty on every run. Controls take the same TIME to answer
+  at every level (about 0.28 s to swing the mount's direction, 0.4 s to
+  stop), so a faster rider covers more ground while turning - and a stage
+  that is fair at its own level but cannot be ridden that fast locks every
+  late-game player out of everything after it.
+- **Scenery that stands beside the route asks `routeAt`** where the route is
+  at its own Z: `cliffWall`, `colonnade`, `torchlight` and `guardians` all do.
+  Placed from the cursor, they were placed from where the route ENDED, and on
+  a route that shifts or climbs that put a cliff through a landing, pillars in
+  the path and torches in mid-air. `tunnel` and `walkway` capture their line
+  BEFORE laying the floor for the same reason, and a tunnel's walls stand
+  three units back from the floor's edge so a weaving tunnel does not put the
+  end face of each wall segment in the lane.
+
+`verify:difficulty` drives the real simulation with four riders on every
+stage from five start times: HOLD (W and jump, no steering), SPAM (W and jump,
+steering onto the landing), RUNNER (W, steering, jumping only at edges - the
+"just hop the gaps" player) and SKILLED (plans two and a half seconds ahead,
+waits for things, and jumps at edges or at the last moment a jump still
+lands). The bar: the three riders with no skill clear no more than a handful
+of stages and almost nothing from act two on; the skilled rider clears every
+stage from most start times, both at the stage's own level and at level one
+hundred and sixty. Guardians chase on the server only, so stages 18 and 29
+are measured without them and are harder than reported.
 
 - `STAGE_TUNING` is the ONE place a stage is named and levelled. The
   recommended SPEED is derived from the level through the curve the player
@@ -681,12 +776,110 @@ can z-fight. `verify:course` audits it:
   speed, so validation and movement cannot disagree.
 - **Deaths are decided on the server tick**, from the position it simulated and
   the clock it owns.
-- Persistence sits behind `PersistenceAdapter`, and `createPersistence` is the
-  ONLY place naming a concrete adapter.
+- Persistence sits behind `ProfileStorage`, and `createPersistence` is the
+  ONLY place naming a concrete store. See **Player progress** below.
 - Only the DERIVING facts are persisted. The one exception is `upgradeSlot`,
   which is a CHOICE rather than a derived fact: re-deriving it would either
   silently promote everyone to the best pad their wallet allows, or reset them
   to +1 every session. It is still clamped to what the restored Wins afford.
+
+## Player progress
+
+Signed-in Bloxity players keep their progress on their ACCOUNT - every browser,
+every device, through restarts, scale-to-zero and deploys. Guests keep it in
+their browser. Nothing on Legion resets progress any more.
+
+- **Storage.** `MONGODB_URI` set (Legion injects it into every pod: an
+  ISOLATED managed database per game+channel, named in the URI - use
+  `client.db()`) means MongoDB; unset means JSON files in `EVOLVE_DATA_DIR`,
+  the dev store. There is no Bloxity database API. The driver is `mongodb`
+  6.x, because `engines` allows Node 20.11 and 7.x needs 20.19; it is HOISTED
+  to the root node_modules, which is the only one the Dockerfile copies.
+- **The contract is PER KEY**: `get` / `put` / `insertIfAbsent` / `loadAll` /
+  `flush`, one document per player. Several pods share one database, so
+  NOTHING writes a whole-map snapshot back, and a profile is read from storage
+  at JOIN time - never from a cache filled at boot. The one boot snapshot is
+  the leaderboard's, refreshed every minute, newer `updatedAt` winning.
+- **A failed read is not "no profile".** `get` THROWS, and `onAuth` then
+  REFUSES the join (4503); the client's join backoff brings the player in once
+  storage is back. Letting them in on an empty profile would have the next
+  autosave write that emptiness over their real one.
+- **Writes** queue the LATEST update per key and land as idempotent
+  `updateOne($set, upsert)` - never a replace. Failures retry with backoff for
+  as long as it takes; nothing is dropped. A save `$unset`s only the known
+  clearable fields (`CLEARABLE_FIELDS`), and every field this build does not
+  know survives it - the old JSON loader silently dropped unknown fields on
+  restart. The store reads its own queued writes back, so a leave and a quick
+  rejoin on one pod never read a stale copy.
+- **Boot never fails on storage.** A database that is down is logged loudly,
+  `/health` keeps answering (or Legion restart-loops the pod), and joins fail
+  cleanly until it is back. The Mongo client is made lazily and REPLACED if
+  its first connect fails: a MongoClient whose initial connect fails keeps its
+  closed topology and fails every later operation for ever.
+- **Shutdown** is `gracefullyShutdown(false)`, THEN await the store's flush
+  and close, then exit. With no argument Colyseus exits before the flush runs.
+- **The JSON store** writes temp + fsync + rename, recovers a leftover `.tmp`
+  that parses (a save that was fsynced but never renamed), and MOVES ASIDE a
+  file it cannot parse rather than overwrite it.
+- **Legacy import.** A `profiles.json` in the data directory is imported into
+  Mongo on every boot with `$setOnInsert` - insert-only, never a replace.
+  Account-prefixed keys in it are skipped.
+
+### Identity
+
+- **Keys.** An account is `bloxity:<accountId>`; a guest is this browser's id.
+  The prefix is RESERVED: a browser id carrying it - or any malformed one - is
+  refused, and that player plays as an UNSAVED guest. Otherwise a guest could
+  name themselves into somebody's account.
+- **Only a verified token names an account.** The client sends its portal
+  TOKEN (`Legion.SDK.auth.getToken()`) with the join and again, as an `Auth`
+  message, whenever the login changes - deduped. Never an account id, anywhere,
+  Bux included.
+- **Verification** is `POST https://api.bloxity.io/v1/auth/game-token/verify`
+  with `Authorization: Bearer <token>` and `{ gameSlug }` - the call the
+  official SDK makes. The host is a CONSTANT, not configuration. The token is
+  NEVER verified locally: `JWT_SECRET` is the game's own secret, not
+  Bloxity's signing key. FAIL CLOSED: only a 2xx carrying a non-empty string
+  `_id` (as `{ user }` or the user itself) is an account.
+- **Three outcomes, not two.** Verified; rejected (4xx: a guest); unavailable
+  (timeout, 5xx, a 2xx without an id: a guest FOR NOW, re-verified on a
+  backoff, never a permanent demotion). Verified results are cached for five
+  minutes capped at the token's `exp`, rejected ones for 30 s, unavailable
+  never - keyed by a hash of the token.
+
+### First login and switching
+
+- **An account's profile always wins.** Browser data never touches it.
+- **An account with none** takes this browser's guest progress - if it has
+  real progress and was never migrated - through `insertIfAbsent(account,
+  guest + migratedFrom)`. ONLY once that insert succeeds is the guest copy
+  marked `migratedTo` (and kept, as a recovery copy): a crash between the two
+  duplicates progress, never loses it. Losing the insert race loads the winner.
+- **A `migratedTo` guest profile** is never restored, never migrated again -
+  which stops one browser seeding its progress into many accounts - and never
+  on a board. A guest in that browser plays on under a FRESH id the server
+  sends (`GuestId`), so nothing saves over the recovery copy.
+- **Sign-in and sign-out mid-session** are a message on the LIVE session, not a
+  reconnect: a reconnect can land on another pod before the last write reaches
+  the database. While switching, the session's autosaves are blocked; the
+  profile being LEFT is saved from live state and must be durable first; the
+  new one is loaded (a sign-in from a guest carries the LIVE state, newer than
+  the autosave), applied, pushed through the SAME initialisation `onJoin`
+  uses, owed purchases are re-applied, the player is placed at spawn and
+  saved. Storage failing anywhere before the apply leaves the session where
+  it was, and it tries again. Only the newest login counts.
+
+### Purchases
+
+- The webhook records each purchase DURABLY, keyed by its transaction id,
+  against `bloxity:<userId>` - the account Bloxity says paid - and answers 2xx
+  only once it has (503 otherwise, so Bloxity retries). A retry is a
+  duplicate key, and pays once across every pod and restart.
+- Only a session whose account the server VERIFIED claims, atomically, so two
+  pods cannot both apply one grant. The profile records the transaction id,
+  and only once that profile write is durable is the grant marked applied. A
+  claim that is never completed goes stale and is claimed again; the profile's
+  record stops it paying twice.
 
 ## UI
 
@@ -802,10 +995,13 @@ silencing it.
 Every call is guarded; a missing SDK degrades to "no portal", never to a broken
 game. Bux are server-authoritative like every other reward: the client passes a
 SKU and NEVER a price, the webhook is `POST /bloxity/bux`, and **answering 2xx
-is the contract**. Fulfilment QUEUES rather than writes, because the webhook
-arrives on the HTTP thread while the player may be live.
+is the contract** - sent only once the purchase is durably recorded. Fulfilment
+QUEUES rather than writes, because the webhook arrives on the HTTP thread while
+the player may be live. Who a player IS comes only from a token Bloxity
+verifies - see **Player progress**.
 
-The game slug is `speed-evolve`, overridable with `VITE_BLOXITY_GAME_ID`.
+The game slug is `speed-evolve`, overridable with `VITE_BLOXITY_GAME_ID` on the
+client and `BLOXITY_GAME_ID` (which Legion injects) on the server.
 
 ## Verification
 
@@ -833,8 +1029,21 @@ Do not claim something works without running it.
   `verify:progression` exercises the server's reward, evolution, upgrade and
   purchase authority INCLUDING the rejection paths.
 - `npm run size:client` must report under 12 MB.
+- `npm run verify:difficulty` must pass after any change to a stage. It takes
+  several minutes, which is why it is not part of `verify`; `--stage N` runs
+  one stage and `--quick` uses three start times instead of five.
 - `npm run verify:capacity` needs a RUNNING server, which is why it is not part
   of `verify`.
+- `npm run verify:persistence` must pass after any change to storage,
+  identity or purchases. It spawns the BUILT server with
+  `scripts/persistence-stub.mjs` preloaded (`node --import`) - which replaces
+  Bloxity's verify URL and NOTHING else; there is no test switch in production
+  code - joins it with real colyseus.js clients, and reads the store directly.
+  It always runs the JSON store; with `MONGODB_URI` it also runs against that
+  database and WIPES it; with a mongod binary (`MONGOD_BIN`, or
+  `~/.cache/mongodb-binaries`) it drives its own mongod for the outage tests.
+  Not part of `verify`: it takes a couple of minutes. On Windows it kills
+  servers hard, so it waits for writes to be visible in the store first.
 - Browser behaviour must be checked in a real browser.
 
 When driving the game from the browser console for a test: the window `blur`
@@ -845,7 +1054,14 @@ steer with `look.addLookDelta(look.yaw - target, 0)`.
 
 ## Current milestone
 
-Milestone 4 is complete: the environment was rebuilt as a rainforest. The
+Milestone 5 is complete: the thirty stages were rebuilt for difficulty. Every
+gap, landing and width is a fraction of the stage's own jump reach, the
+chains overshoot from act two on, every crossing wider than a jump moves, and
+`verify:difficulty` proves the course beats riders with no skill while a
+skilled rider clears every stage - at its own level and at level 160. See
+**Difficulty** above.
+
+Milestone 4 was: the environment was rebuilt as a rainforest. The
 valley's rock walls are gone and a layered forest bounds the world in their
 place, following the route's own elevation the whole way.
 

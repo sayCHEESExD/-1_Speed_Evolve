@@ -112,6 +112,21 @@ export const MessageType = {
    * nameplates and boards, and read by nothing that decides an outcome.
    */
   SetIdentity: 'setIdentity',
+  /**
+   * Client -> server: "my portal login is now THIS token" - or none, for a
+   * sign-out. Sent on join as an option and again on every login change.
+   *
+   * A TOKEN and never an account id: the server asks Bloxity who it belongs
+   * to, and the answer is the only thing that ever names an account.
+   */
+  Auth: 'auth',
+  /**
+   * Server -> client: "keep this browser id from now on".
+   *
+   * Sent when this browser's old guest id was migrated into an account: that
+   * copy is kept for recovery, so guest play continues under a fresh id.
+   */
+  GuestId: 'guestId',
 } as const;
 
 export type MessageType = (typeof MessageType)[keyof typeof MessageType];

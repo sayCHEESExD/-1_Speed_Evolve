@@ -28,6 +28,18 @@ export const PALETTE = {
   mud: '#5e4526',
   mudDark: '#46331b',
 
+  /*
+   * Quicksand. Olive-grey and wet where the trail beside it is warm brown,
+   * because the one thing a player must read at speed is which of two
+   * patches of ground will swallow them.
+   */
+  quicksand: '#6f6a3e',
+  quicksandDark: '#4f4a28',
+
+  /** A timed gate: dark lashed timber, heavier than any plank in the world. */
+  gate: '#5a3a22',
+  gateDark: '#3d2716',
+
   /** Mossy rock: valley shelves, cliff ledges, stepping stones. */
   rock: '#7d8a6a',
   rockDark: '#5e6a4e',
@@ -213,8 +225,11 @@ export const PALETTE = {
   treadmillScreen: 0x27323d,
 
   /** Gold chequered win dais. */
-  winPad: '#ff9d1f',
-  winPadAlt: '#ffc247',
+  /** The win plate: two oranges in a checker, studded, on a near-black frame. */
+  winPad: '#ff7a06',
+  winPadAlt: '#ffb43c',
+  winPadStud: '#ffc15e',
+  winPadFrame: 0x1c1d22,
 
   /* ---- The boards on the camp's back wall -------------------------------- */
   /*

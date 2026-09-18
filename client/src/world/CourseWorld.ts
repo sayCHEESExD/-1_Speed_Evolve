@@ -37,6 +37,7 @@ import { Sky } from './Sky.js';
 import { StageMarkers } from './StageMarkers.js';
 import { TrainingArea } from './TrainingArea.js';
 import { UpgradePads } from './UpgradePads.js';
+import { WinPads } from './WinPads.js';
 import { WorldTextures } from './WorldTextures.js';
 import { texturedBox } from './texturedBox.js';
 
@@ -69,6 +70,8 @@ export class CourseWorld {
   readonly platforms: MovingPlatforms;
   readonly foliage: Foliage;
   readonly markers: StageMarkers;
+  /** The win plate at each stage's end: frame, trophy and reward label. */
+  readonly winPads: WinPads;
   /** The twelve speed-upgrade pads, on the player's left. */
   readonly pads: UpgradePads;
   /** The three traders' stalls. */
@@ -108,6 +111,9 @@ export class CourseWorld {
 
     this.markers = new StageMarkers();
     this.root.add(this.markers.root);
+
+    this.winPads = new WinPads();
+    this.root.add(this.winPads.root);
 
     this.pads = new UpgradePads();
     this.root.add(this.pads.root);
@@ -151,6 +157,7 @@ export class CourseWorld {
   update(delta: number, elapsed: number): void {
     this.platforms.update(elapsed);
     this.hazards.update(elapsed);
+    this.winPads.update(elapsed);
     this.pads.update();
     this.training.update(delta);
     this.guardians.update(delta);
@@ -178,6 +185,7 @@ export class CourseWorld {
     this.hazards.dispose();
     this.foliage.dispose();
     this.markers.dispose();
+    this.winPads.dispose();
     this.pads.dispose();
     this.shops.dispose();
     this.training.dispose();
@@ -309,6 +317,12 @@ export class CourseWorld {
         );
       case 'mud':
         return this.textured(this.textures.sand(PALETTE.mud, PALETTE.mudDark));
+      case 'quicksand':
+        return this.textured(this.textures.sand(PALETTE.quicksand, PALETTE.quicksandDark));
+      case 'gate':
+        return this.textured(
+          this.textures.planks(PALETTE.gate, PALETTE.gateDark, PALETTE.plankSpeck),
+        );
       case 'rock':
         return this.textured(this.textures.stone(PALETTE.rock, PALETTE.rockDark));
       case 'stone':
@@ -337,7 +351,9 @@ export class CourseWorld {
           this.textures.planks(PALETTE.rope, PALETTE.ropeDark, PALETTE.plankSpeck),
         );
       case 'winPad':
-        return this.textured(this.textures.goldCheck(PALETTE.winPad, PALETTE.winPadAlt));
+        return this.textured(
+          this.textures.goldCheck(PALETTE.winPad, PALETTE.winPadAlt, PALETTE.winPadStud),
+        );
       case 'board':
         return this.solidMaterial(PALETTE.boardFrameDark);
       // The pads' own surfaces are re-tinted by lock state every time the

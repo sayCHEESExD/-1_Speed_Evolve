@@ -7,6 +7,7 @@ import {
 import {
   BoxGeometry,
   CircleGeometry,
+  CylinderGeometry,
   Group,
   Mesh,
   MeshBasicMaterial,
@@ -52,6 +53,9 @@ export class Hazards {
     // 16x12 segments: chunky enough to read as a toy ball, cheap enough that a
     // dozen of them cost nothing.
     const ball = this.keep(new SphereGeometry(1, 16, 12));
+    // A trunk, lying along X: unit radius and unit length, scaled per log.
+    const trunk = this.keep(new CylinderGeometry(1, 1, 1, 12, 1));
+    trunk.rotateZ(Math.PI / 2);
     const bar = this.keep(new BoxGeometry(1, 1, 1));
     const patch = this.keep(new CircleGeometry(1, 18));
 
@@ -108,6 +112,14 @@ export class Hazards {
           mesh.scale.set(hazard.radius * 1.8, hazard.radius * 1.8, hazard.radius * 1.8);
           break;
         case 'boulder':
+          if (hazard.spanX > 0) {
+            // A LOG: a trunk lying across the path, rolling down a slope or
+            // floating across a ford. Lavender like every moving killer that
+            // is not stone - a brown log on a brown trail is invisible.
+            mesh = new Mesh(trunk, hazardMaterial);
+            mesh.scale.set((hazard.spanX + hazard.radius) * 2, hazard.radius, hazard.radius);
+            break;
+          }
           // A real ball, and big. The boulder chase only works if the thing
           // coming down the ramp reads as unstoppable from the far end of it.
           mesh = new Mesh(ball, rockMaterial);
@@ -125,10 +137,21 @@ export class Hazards {
           mesh.scale.set(hazard.radius * 2, hazard.sweep, hazard.radius * 1.4);
           mesh.castShadow = false;
           break;
+        case 'vine':
+          // A thorn vine: a lavender column from the canopy to the ground. The
+          // killer colour, not a green one - a green vine swinging through
+          // green jungle is the camouflage the lavender rule exists to stop.
+          mesh = new Mesh(bar, hazardMaterial);
+          mesh.scale.set(hazard.radius * 1.5, Math.max(1, hazard.y - hazard.fromY), hazard.radius * 1.5);
+          break;
         default:
           // A swing: a vine-hung log, drawn as a bar across the path.
           mesh = new Mesh(bar, hazardMaterial);
-          mesh.scale.set(hazard.radius * 5.4, hazard.radius * 1.5, hazard.radius * 1.5);
+          mesh.scale.set(
+            Math.max(hazard.radius * 5.4, (hazard.spanX + hazard.radius) * 2),
+            hazard.radius * 1.5,
+            hazard.radius * 1.5,
+          );
       }
 
       mesh.position.set(hazard.x, hazard.y, hazard.z);
@@ -167,6 +190,14 @@ export class Hazards {
         case 'dart':
           mesh.rotation.y = 0;
           break;
+        case 'vine': {
+          // Centred on its column, and leaning with its own swing so it reads
+          // as hung from above rather than sliding along the ground.
+          const half = (hazard.y - hazard.fromY) / 2;
+          mesh.position.y = this.at.y - half;
+          mesh.rotation.z = ((this.at.x - hazard.x) / Math.max(1, hazard.sweep)) * 0.22;
+          break;
+        }
         case 'faller': {
           const warning = this.warnings[i];
           if (warning) {
@@ -184,9 +215,9 @@ export class Hazards {
         case 'boulder':
           // Rolling the RIGHT way: the spin comes from the same travel the
           // position does, so a boulder never slides while appearing to roll
-          // backwards.
+          // backwards. A log turns about its own length only.
           mesh.rotation.x = -this.at.z / hazard.radius;
-          mesh.rotation.z = -this.at.x / hazard.radius;
+          if (hazard.spanX === 0) mesh.rotation.z = -this.at.x / hazard.radius;
           break;
         default:
           // A swing hangs from a vine, so it tilts with its own arc.

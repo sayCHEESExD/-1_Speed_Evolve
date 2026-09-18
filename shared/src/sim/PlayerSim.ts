@@ -1,4 +1,10 @@
-import { activeTreadmillAt, surfaceAt, treadmillAt, type MotionPoint } from '../config/course.js';
+import {
+  QUICKSAND,
+  activeTreadmillAt,
+  surfaceAt,
+  treadmillAt,
+  type MotionPoint,
+} from '../config/course.js';
 import { MOVEMENT } from '../config/movement.js';
 import { MOUNT_HEIGHT } from '../constants/world.js';
 import { SPAWN_POSITION, SPAWN_ROTATION_Y } from '../constants/world.js';
@@ -70,6 +76,16 @@ export interface PlayerMotion {
    * same window the client predicted.
    */
   coyote: number;
+  /**
+   * How deep the mount has sunk into quicksand, in world units.
+   *
+   * The one piece of the WORLD that has a memory, and it is kept here, on the
+   * player, rather than on the world: the quicksand is a pure function of
+   * nothing, and each player sinks into it on their own. It grows while the
+   * mount stands on quicksand, holds in the air, and works back out on firm
+   * ground. Replicated like `coyote`, because replay reads it.
+   */
+  sink: number;
 }
 
 /** One frame of player intent. Carries no position - only what was pressed. */
@@ -136,6 +152,7 @@ export const createMotion = (): PlayerMotion => ({
   treadmill: 0,
   treadmillUnder: 0,
   coyote: 0,
+  sink: 0,
 });
 
 export const createSimEvents = (): SimEvents => ({
@@ -165,6 +182,7 @@ export const copyMotion = (from: PlayerMotion, to: PlayerMotion): void => {
   to.treadmill = from.treadmill;
   to.treadmillUnder = from.treadmillUnder;
   to.coyote = from.coyote;
+  to.sink = from.sink;
 };
 
 /** Reset to a spawn transform. Used by both sides on respawn. */
@@ -187,6 +205,7 @@ export const resetMotion = (
   motion.treadmill = 0;
   motion.treadmillUnder = 0;
   motion.coyote = 0;
+  motion.sink = 0;
 };
 
 export const horizontalSpeed = (motion: PlayerMotion): number =>
@@ -292,6 +311,25 @@ export const stepPlayer = (
   // window however fast the player is moving.
   if (motion.grounded) motion.coyote = COYOTE_TIME;
   else motion.coyote = Math.max(0, motion.coyote - dt);
+
+  /*
+   * QUICKSAND. Standing in it sinks the mount, in place, by the time spent
+   * there - so stopping is what kills, and the mud pool laid under every
+   * patch at `QUICKSAND.drownDepth` does the killing through the ordinary
+   * fall test. Nothing here decides a death.
+   *
+   * The mount is lowered WITH its surface, so it stays grounded as it sinks
+   * rather than dropping a hair every step and landing again. In the air the
+   * depth holds, so hopping across is progress but not a cure; firm ground
+   * works it back out.
+   */
+  if (motion.grounded && collision.groundKind === 'quicksand') {
+    const deeper = Math.min(QUICKSAND.drownDepth + 1, motion.sink + QUICKSAND.sinkRate * dt);
+    motion.y -= deeper - motion.sink;
+    motion.sink = deeper;
+  } else if (motion.grounded && motion.sink > 0) {
+    motion.sink = Math.max(0, motion.sink - QUICKSAND.recoverRate * dt);
+  }
 
   /*
    * Derived last, from the position this step actually reached.
@@ -417,7 +455,10 @@ const applyHorizontal = (
 
   // ONE ground speed, scaled by the authoritative multiplier the player's
   // LEVEL earned them. No branch here, because there is nothing to branch on.
-  const targetSpeed = MOVEMENT.runSpeed * params.moveMultiplier;
+  // Bogged in quicksand, the same speed is a fraction of itself. Read off the
+  // replicated sink, so both sides slow the mount on exactly the same step.
+  const bogged = motion.grounded && motion.sink > 0 ? QUICKSAND.speed : 1;
+  const targetSpeed = MOVEMENT.runSpeed * params.moveMultiplier * bogged;
   const control = motion.grounded ? 1 : MOVEMENT.airControl;
 
   /*
@@ -506,7 +547,8 @@ const resolveGround = (
   previousY: number,
   collision: WorldCollision,
 ): void => {
-  const surfaceY = collision.surfaceYAt(motion.x, motion.z, previousY);
+  // The player's own quicksand depth lowers every quicksand top for them.
+  const surfaceY = collision.surfaceYAt(motion.x, motion.z, previousY, motion.sink);
 
   if (surfaceY === null || motion.vy > 0 || motion.y > surfaceY) {
     motion.grounded = false;

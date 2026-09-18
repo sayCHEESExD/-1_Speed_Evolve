@@ -16,6 +16,8 @@ import {
   calculateSpeedGain,
   describeSpeedGain,
   formatSpeedGain,
+  FOOTFALL_DISTANCE,
+  footfallSpeedGain,
   mountMultiplier,
   rebirthMultiplier,
   trailMultiplier,
@@ -436,7 +438,8 @@ console.log('treadmills');
     yes.rebirths = need;
     yes.treadmill = tier.index;
     on.reset('test', yes);
-    for (let i = 0; i < 30; i += 1) on.credit('test', yes, 1 / 60);
+    // Two seconds: long enough for the slowest belt to complete a footfall.
+    for (let i = 0; i < 120; i += 1) on.credit('test', yes, 1 / 60);
     check(`  belt ${tier.index} (x${tier.multiplier}) pays at ${need} rebirths`, yes.totalSpeed > 0, true);
 
     if (need === 0) continue;
@@ -648,10 +651,14 @@ console.log('moving platforms carry their rider');
   const shuttle = MOVING_SOLIDS.find((m) => m.motion === 'shuttle' && m.amount > 10);
   check('the world has a shuttle platform', !!shuttle, true);
   if (shuttle) {
+    // Started where the platform IS at the first step, not where it was
+    // authored: a raft on a long run can be a whole gap away from its
+    // authored centre at any given instant.
+    const at = platformOffsetAt(shuttle, 4, { x: 0, y: 0, z: 0 });
     const motion = createMotion();
-    motion.x = (shuttle.minX + shuttle.maxX) / 2;
-    motion.y = shuttle.maxY;
-    motion.z = (shuttle.minZ + shuttle.maxZ) / 2;
+    motion.x = (shuttle.minX + shuttle.maxX) / 2 + at.x;
+    motion.y = shuttle.maxY + at.y;
+    motion.z = (shuttle.minZ + shuttle.maxZ) / 2 + at.z;
     motion.grounded = true;
     const fromX = motion.x;
     const fromZ = motion.z;
@@ -1045,19 +1052,30 @@ console.log('deterministic Speed gain');
         distance += d;
       }
       const g = speeds.credit('test', player, dt);
-      if (g.steps === 0) continue;
-      rates.add(g.perStep);
-      steps += g.steps;
-      if (!Number.isInteger(g.steps) || !Object.is(g.gained, g.steps * b.gain)) wrong += 1;
+      for (const award of g.awards) {
+        rates.add(award.gain);
+        steps += 1;
+        // Every award is ONE footfall's gain, bit for bit.
+        if (!Object.is(award.gain, footfallSpeedGain(b))) wrong += 1;
+      }
     }
-    check('  every payment is whole steps at exactly the rate', wrong, 0);
-    check('  and every one of them paid the same per-step figure', rates.size === 1 && rates.has(b.gain), true);
+    check('  every award is exactly one footfall of the calculated gain', wrong, 0);
     check(
-      '  steps paid = distance / stride, rounded down',
-      steps,
-      Math.floor(distance / SPEED.strideDistance + 1e-6),
+      '  and every one of them paid the same figure',
+      rates.size === 1 && rates.has(footfallSpeedGain(b)),
+      true,
     );
-    near('  the total rose by exactly steps x rate', player.totalSpeed - start, steps * b.gain, 1e-12);
+    check(
+      '  footfalls paid = distance / footfall, rounded down',
+      steps,
+      Math.floor(distance / FOOTFALL_DISTANCE + 1e-6),
+    );
+    near(
+      '  the total rose by exactly footfalls x steps-per-footfall x step gain',
+      player.totalSpeed - start,
+      steps * SPEED.footfallSteps * b.gain,
+      1e-12,
+    );
     check(
       '  and the level is read off that accumulated total',
       player.level,
@@ -1089,7 +1107,78 @@ console.log('deterministic Speed gain');
     near('  which is exactly 12 steps', at60, 12 * 125 * 1.04, 1e-12);
   }
 
-  // Leaving the ground pays the configured bonus steps, at the same rate.
+  // ONE FOOTFALL, ONE AWARD. The popup flood: every two-unit step was paid
+  // and announced on its own, so one stride of the legs was a dozen "+1"s.
+  {
+    check('a footfall is a whole number of steps', Number.isInteger(SPEED.footfallSteps) && SPEED.footfallSteps > 1, true);
+    check('  and its distance is that many strides', FOOTFALL_DISTANCE, SPEED.strideDistance * SPEED.footfallSteps);
+
+    // Ride exactly one footfall in sixty-a-second inputs, at the TOP of the
+    // speed curve and at the bottom: exactly one award, of the whole sum.
+    for (const level of [1, 12, 160]) {
+      const speeds = new SpeedService();
+      const player = newPlayer(speeds);
+      player.upgradeSlot = 3;
+      // Really AT that level, so the server's own anti-teleport cap - which
+      // is the player's own run speed - allows that level's honest step.
+      player.rebirths = 6;
+      player.totalSpeed = totalSpeedToReach(level);
+      speeds.syncDerived(player);
+      check(`  the rider is at level ${level}`, player.level, level);
+      const b = speeds.breakdown(player);
+      const perInput = resolveMovementProfile(level).runSpeed / 60;
+      player.z = 0;
+      speeds.reset('test', player);
+      speeds.credit('test', player, 1 / 60);
+      const awards = [];
+      let maxPerInput = 0;
+      let travelled = 0;
+      while (travelled + perInput <= FOOTFALL_DISTANCE + 1e-9) {
+        player.z += perInput;
+        travelled += perInput;
+        const got = speeds.credit('test', player, 1 / 60).awards;
+        maxPerInput = Math.max(maxPerInput, got.length);
+        awards.push(...got);
+      }
+      // Finish the footfall exactly.
+      player.z += FOOTFALL_DISTANCE - travelled;
+      const last = speeds.credit('test', player, 1 / 60).awards;
+      maxPerInput = Math.max(maxPerInput, last.length);
+      awards.push(...last);
+      check(`  level ${level}: one footfall is ONE award`, awards.length, 1);
+      check(`  level ${level}: no input ever carries two`, maxPerInput, 1);
+      check(
+        `  level ${level}: and it is the whole footfall's Speed, as one figure`,
+        awards[0]?.gain,
+        b.gain * SPEED.footfallSteps,
+      );
+    }
+
+    // A death does not eat the part-footfall already ridden.
+    const speeds = new SpeedService();
+    const player = newPlayer(speeds);
+    speeds.syncDerived(player);
+    player.z = 0;
+    speeds.reset('test', player);
+    speeds.credit('test', player, 1 / 60);
+    // Moves of a twentieth of a footfall: an honest input for a level-one rider.
+    for (let i = 0; i < 10; i += 1) {
+      player.z += FOOTFALL_DISTANCE / 20;
+      speeds.credit('test', player, 1 / 60);
+    }
+    player.z = -500;
+    speeds.reset('test', player);
+    speeds.credit('test', player, 1 / 60);
+    let paid = 0;
+    for (let i = 0; i < 10; i += 1) {
+      player.z += FOOTFALL_DISTANCE / 20;
+      paid += speeds.credit('test', player, 1 / 60).awards.length;
+    }
+    check('  half a footfall, a respawn and the other half pay one award', paid, 1);
+  }
+
+  // Leaving the ground pays NOTHING extra. The jump bonus was a second,
+  // occasional source of Speed beside the one every step pays.
   {
     const speeds = new SpeedService();
     const player = newPlayer(speeds);
@@ -1099,10 +1188,30 @@ console.log('deterministic Speed gain');
     speeds.credit('test', player, 1 / 60);
     player.grounded = false;
     const jump = speeds.credit('test', player, 1 / 60);
-    check('a jump pays the configured bonus steps', jump.jumpSteps, SPEED.jumpBonusSteps);
-    check('  at exactly the per-step rate', jump.gained, jump.steps * player.speedPerStep);
-    const air = speeds.credit('test', player, 1 / 60);
-    check('  and staying in the air pays it only once', air.jumpSteps, 0);
+    check('leaving the ground pays no bonus', jump.awards.length, 0);
+    check('  and the config has no jump bonus to pay', 'jumpBonusSteps' in SPEED, false);
+  }
+
+  // A long run at one setup: every single award is the identical number, and
+  // the total is exactly awards x that number.
+  {
+    const speeds = new SpeedService();
+    const player = newPlayer(speeds);
+    player.upgradeSlot = 5;
+    player.mountSlot = 3;
+    speeds.syncDerived(player);
+    const expected = footfallSpeedGain(speeds.breakdown(player));
+    player.z = 0;
+    speeds.reset('test', player);
+    speeds.credit('test', player, 1 / 60);
+    const gains = [];
+    for (let i = 1; i <= 600; i += 1) {
+      // Uneven movement, with jumps in it.
+      player.z += 0.2 + ((i * 37) % 11) / 20;
+      player.grounded = i % 45 > 20;
+      for (const award of speeds.credit('test', player, 1 / 60).awards) gains.push(award.gain);
+    }
+    check(`${gains.length} consecutive awards at one setup are all ${expected}`, gains.every((g) => Object.is(g, expected)), true);
   }
 
   // A movement message the server has already seen is refused before any

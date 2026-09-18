@@ -1,15 +1,21 @@
 import { serverConfig } from '../config/serverConfig.js';
-import { JsonFilePersistence } from './JsonFilePersistence.js';
-import type { PersistenceAdapter } from './PersistenceAdapter.js';
+import { JsonProfileStorage } from './JsonProfileStorage.js';
+import { MongoProfileStorage } from './MongoProfileStorage.js';
+import type { ProfileStorage } from './ProfileStorage.js';
 
-export type { PersistenceAdapter, StoredProfile } from './PersistenceAdapter.js';
+export type { GrantRecord, ProfileStorage } from './ProfileStorage.js';
+export { StorageUnavailableError } from './ProfileStorage.js';
+export type { ProfileUpdate, StoredProfile } from './StoredProfile.js';
 
 /**
- * The ONLY place a concrete adapter is named.
+ * The ONLY place a concrete store is named.
  *
- * Swapping the shipped JSON file for a database is a change to this function
- * and to nothing else - everything above the boundary holds a
- * `PersistenceAdapter` and knows no more than that.
+ * `MONGODB_URI` set - which Legion does for every backend pod, an isolated
+ * database per game and channel - means MongoDB, and progress lives on the
+ * account across every device, restart, scale-to-zero and deploy. Unset means
+ * the JSON files in the data directory, the dev store.
  */
-export const createPersistence = (): PersistenceAdapter =>
-  new JsonFilePersistence(serverConfig.dataDir);
+export const createPersistence = (): ProfileStorage =>
+  serverConfig.mongoUri
+    ? new MongoProfileStorage(serverConfig.mongoUri, serverConfig.dataDir)
+    : new JsonProfileStorage(serverConfig.dataDir);

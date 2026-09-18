@@ -77,3 +77,13 @@ export const sanitizePfpUrl = (raw: unknown): string => {
   if (!url.startsWith(PFP_ORIGIN)) return '';
   return /^[A-Za-z0-9._~:/?#@!$&*+,;=%-]+$/.test(url) ? url : '';
 };
+
+/** Client -> server: the portal login, as a token Bloxity can verify. Null signs out. */
+export interface AuthMessage {
+  token: string | null;
+}
+
+/** Server -> client: the browser id to keep for guest play from now on. */
+export interface GuestIdMessage {
+  playerId: string;
+}

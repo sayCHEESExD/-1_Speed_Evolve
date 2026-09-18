@@ -36,6 +36,21 @@ export type SolidKind =
   | 'jungle'
   /** Wet mud at a river's edge. Drawn darker, and it handles differently. */
   | 'mud'
+  /**
+   * Quicksand: ground that SWALLOWS whoever stops on it.
+   *
+   * The one surface in the world with a memory, and the memory is the
+   * player's rather than the world's: `PlayerMotion.sink` grows while the
+   * mount stands on it and the surface is that far lower FOR THAT PLAYER.
+   * Stop for a second and a half and the mount is under the mud pool laid
+   * just beneath it. Keep moving - or jump - and it is only slow going.
+   */
+  | 'quicksand'
+  /**
+   * A timed gate: timber or carved stone across the whole route, too tall to
+   * jump, that lifts out of the way on a cycle. Always a `gate` mover.
+   */
+  | 'gate'
   /** Mossy rock: the valley shelves and cliff ledges. */
   | 'rock'
   /** Cut and fitted masonry: the ruins and the temple floors. */
@@ -102,7 +117,15 @@ export type PlatformMotion =
    * The collapsing bridge and the crumbling temple floor. Unlike `lift` it
    * spends most of its cycle STILL, so the warning shake is a real warning.
    */
-  | 'collapse';
+  | 'collapse'
+  /**
+   * Shut, lifts clear, stays open, drops shut again.
+   *
+   * The timed gate. `hold` is the fraction of the cycle it is SHUT and
+   * `amount` how far it lifts - more than a mount is tall, so an open gate is
+   * a doorway rather than a ceiling to crawl under.
+   */
+  | 'gate';
 
 /**
  * A platform that moves, and carries whoever is standing on it.
@@ -188,7 +211,14 @@ export type HazardKind =
   /** Fires straight across the path on a cycle: the ruin dart traps. */
   | 'dart'
   /** A column of falling water. Lethal to stand under, and drawn as a curtain. */
-  | 'cascade';
+  | 'cascade'
+  /**
+   * A thorn vine hanging from the canopy, swinging across the path.
+   *
+   * A COLUMN like a cascade - from `y` down to `fromY` - that moves like a
+   * swing. It reaches the ground, so it is dodged or timed, never jumped.
+   */
+  | 'vine';
 
 /**
  * A killer whose position is a pure function of TIME.
@@ -223,13 +253,30 @@ export interface CourseHazard {
   readonly rate: number;
   /** Offset, so a row of hazards is never in lockstep. */
   readonly phase: number;
-  /** Boulder: the Z it starts from and rolls toward, and the Y at each end. */
+  /**
+   * Boulder: the Z it starts from and rolls toward, and the Y at each end.
+   * Vine: `fromY` is the bottom of the column, `y` its top.
+   */
   readonly fromZ: number;
   readonly toZ: number;
   readonly fromY: number;
   readonly toY: number;
-  /** Boulder: how far it drifts in X across its run, for a curving path. */
+  /**
+   * Boulder: how far it travels in X across its run. Small for one rolling
+   * down a curving path; the whole width of the route for one rolling ACROSS
+   * it, whose `fromZ` and `toZ` are then the same.
+   */
   readonly driftX: number;
+  /**
+   * Extra half-length in X, beyond `radius`.
+   *
+   * Zero for a ball. A LOG is a hazard long in X and round in section: a
+   * trunk rolling down a slope at the player, floating across a ford, or
+   * hung from vines across the path. The kill test reaches `radius + spanX`
+   * either side of centre in X and `radius` in Z, so one log is one hazard
+   * rather than a dozen balls in a row.
+   */
+  readonly spanX: number;
 }
 
 /** Scenery the client draws and the simulation ignores entirely. */

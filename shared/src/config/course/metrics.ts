@@ -106,6 +106,39 @@ export const COURSE: CourseMetrics = {
   fallDepth: 13,
 };
 
+/**
+ * How quicksand swallows a mount.
+ *
+ * Read by the simulation, which sinks the mount, and by the route builder,
+ * which lays the lethal mud pool at exactly the depth these numbers drown a
+ * mount at - so the two cannot disagree about how long a player may stand
+ * still.
+ */
+export interface QuicksandTuning {
+  /** Units a second the mount sinks while standing on it. */
+  readonly sinkRate: number;
+  /** Units a second it works its way back out on firm ground. */
+  readonly recoverRate: number;
+  /**
+   * Depth at which it is under, measured from the quicksand's top.
+   *
+   * The mud pool under every quicksand patch is laid so its kill line sits
+   * exactly here, and the existing fall test does the drowning. `sinkRate`
+   * into this is the grace a player has for stopping: about a second and a
+   * half.
+   */
+  readonly drownDepth: number;
+  /** Fraction of the mount's ground speed it keeps while bogged. */
+  readonly speed: number;
+}
+
+export const QUICKSAND: QuicksandTuning = {
+  sinkRate: 1.6,
+  recoverRate: 6,
+  drownDepth: 2.3,
+  speed: 0.6,
+};
+
 /** One act: five stages that share an environment. */
 export interface ActTheme {
   readonly index: number;
@@ -208,9 +241,13 @@ export const STAGE_TUNING: readonly StageTuning[] = [
  */
 export const stageReward = (index: number): number => 3 ** (Math.max(1, Math.floor(index)) - 1);
 
-/** The win pad at a stage's end: a small carved dais beside the path. */
+/**
+ * The win pad at a stage's end: a long studded plate on a spur beside the
+ * path, running OUT from it - `width` is across the route, which is the way
+ * the spur goes - so it reads as a platform to ride onto rather than a tile.
+ */
 export const WIN_PAD: { readonly width: number; readonly length: number; readonly height: number } = {
-  width: 12,
+  width: 24,
   length: 12,
   /** How far it stands proud of whatever it sits on. */
   height: 0.4,

@@ -221,6 +221,7 @@ export class MovementService {
     // the same edge state the server stopped at.
     player.jumpLatched = m.jumpLatched;
     player.coyote = m.coyote;
+    player.sink = m.sink;
     // Derived by the simulation from the position the server computed AND the
     // rebirth count it owns, so a locked machine replicates as no machine.
     player.treadmill = m.treadmill;

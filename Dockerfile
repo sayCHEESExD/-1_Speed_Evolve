@@ -48,7 +48,9 @@ ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 
 # Only what running the server needs: the installed production tree and the
-# two compiled outputs.
+# two compiled outputs. Every runtime dependency - the `mongodb` driver
+# included - is HOISTED to this root node_modules; there is no
+# server/node_modules for this image to miss.
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/shared/package.json ./shared/package.json
@@ -56,17 +58,18 @@ COPY --from=build /app/shared/dist ./shared/dist
 COPY --from=build /app/server/package.json ./server/package.json
 COPY --from=build /app/server/dist ./server/dist
 
-# Profiles are a JSON file, and a container filesystem does not survive a
-# redeploy. Mount a volume here and every player's progression survives a
-# release - see `EVOLVE_DATA_DIR` in the README.
+# WHERE PROGRESS LIVES.
 #
-# ON BLOXITY LEGION THIS IS NOT ENOUGH, and the declaration below is honest
-# about what it can promise: `VOLUME` asks the Docker CLI for an anonymous
-# volume and asks Kubernetes for NOTHING. Legion runs pods that scale to zero
-# when the last player leaves, so /data goes with them. Legion injects
-# `MONGODB_URI` - an isolated database per game+channel - for exactly this
-# case, and until a `PersistenceAdapter` reads it, progression there lasts only
-# as long as a pod does.
+# On Bloxity Legion: in MongoDB. Legion injects `MONGODB_URI` - an isolated
+# managed database per game+channel - into every pod, and the server uses it
+# whenever it is set. Progress is per player, per key (`bloxity:<account>` for
+# a signed-in player, the browser id for a guest), and survives restarts,
+# scale-to-zero, every deploy and every device the player signs in from.
+#
+# Without `MONGODB_URI` - local runs, other hosts - it is JSON files in
+# EVOLVE_DATA_DIR. Mount a volume here for those to survive a redeploy. On
+# Legion /data holds nothing that matters: a `profiles.json` found there at
+# boot is imported into Mongo, insert-only, and that is all it is used for.
 ENV EVOLVE_DATA_DIR=/data
 VOLUME ["/data"]
 
@@ -83,6 +86,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||2569)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 # Straight to node, with no npm wrapper: npm swallows signals, so a container
-# stopped by the host would not run the shutdown handler that flushes profiles
-# to disk.
+# stopped by the host would not run the shutdown handler - which closes every
+# room, then WAITS for the queued saves to land in the database before it
+# exits.
 CMD ["node", "server/dist/index.js"]

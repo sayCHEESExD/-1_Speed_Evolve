@@ -51,6 +51,8 @@ export interface NetPlayerState extends PlayerMotionState {
   jumpLatched: boolean;
   /** Coyote window left, so a replayed jump off a lip is allowed identically. */
   coyote: number;
+  /** Quicksand depth, so replay resumes at the height the server had. */
+  sink: number;
   ready: boolean;
 
   /**

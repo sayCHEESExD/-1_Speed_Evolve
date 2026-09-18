@@ -1,260 +1,174 @@
-import { block, box, decorate, hazard, mover, pit, widen } from '../emit.js';
+import { box, mover, pit, widen } from '../emit.js';
 import { defineStage } from '../stage.js';
 import type { Route } from '../route.js';
-import { colonnade, guardians, scatterJungle, torchlight } from './scenery.js';
+import { carouselCrossing, liftCrossing, movingBridge } from './kit.js';
+import { colonnade, enclose, guardians, scatterJungle, torchlight } from './scenery.js';
 
 /**
  * ACT THREE - THE ANCIENT RUINS.
  *
- * Cut stone, and the act where the WORLD starts to move against the player:
- * darts, statues' arms, turning stones and a floor that gives way. The paths
- * are six and a half wide, the chains of landings overshoot, and every timed
- * thing has a readable rhythm and a stretch before it long enough to stop on.
+ * Cut stone, grey and rectilinear where the jungle was green and organic,
+ * over a void rather than a river. Twenty wide, and every hazard here is a
+ * TRAP somebody built: darts from the walls, stones dropped from above,
+ * statues whose arms sweep the hall, stones that turn over the void, and a
+ * court whose floor gives way in a wave.
  *
- * The old act laid a hundred and twenty units of straight causeway, a sixty-
- * wide plaza, and turning stones across gaps a jump could clear without them.
- * Every one of those was a place to hold W.
+ * Hazards now come two at a time. A sand trap sits in front of a gate; a
+ * dart row runs into a crusher row; the turning stones are separated by a
+ * rotating arm and a lift.
  */
+
+const ruins = (r: Route): void => {
+  r.over('void');
+  r.fall = 13;
+};
 
 /**
  * 11 - TEMPLE APPROACH.
  *
- * The causeway to the first temple, fallen into a chain of slabs; the great
- * stair; and a terrace crossed by dart traps. The terrace is a single lane
- * with the darts firing ACROSS it, so they are timed or jumped rather than
- * avoided by riding round them.
+ * A colonnaded causeway: darts fired across it, a stair, a row of crushers,
+ * a sand trap before a stone gate, and a moving bridge of cut stone.
  */
 const templeApproach = (r: Route): void => {
-  r.made('stone').over('void');
+  ruins(r);
   const J = r.reach;
-  r.width = 7;
+  r.made('stone');
 
-  r.path(24, { aim: 0, rails: true });
-  const causewayFrom = r.z;
-  r.hops(4, { gap: J * 0.45, land: J * 0.42, width: 7, jog: [0, 5, -5, 0], kind: 'stone', depth: 10 });
-  r.gap(J * 0.42);
-  colonnade(r, r.z - causewayFrom, { spacing: 20, offset: 13, height: 30, broken: 0.3 });
-  for (let i = 0; i < 4; i += 1) guardians(r, causewayFrom + 18 + i * 40, 2, 16);
+  r.path(60, { aim: 6 });
+  const hallFrom = r.z;
+  r.darts(110, { count: 5, period: 2.2 });
+  r.stairs(5, 0.8, { run: 8 });
+  r.crushers(100, { rows: 3, lanes: 2, period: 3 });
+  r.quicksand(55, { islands: 2 });
+  r.gate({ rate: 0.24, hold: 0.5, kind: 'stone' });
+  r.path(50);
+  movingBridge(r, 2, { gap: J * 0.3, size: J * 0.35, width: 14, travel: 12, rate: 0.22, kind: 'stone' });
+  r.path(40, { aim: 0 });
 
-  r.path(16, { width: 8 });
-  r.stairs(10, 3.2, { run: 7.5, width: 9 });
-
-  // The dart terrace: one lane, the darts firing across it from the walls.
-  r.path(20, { width: 7, rails: true });
-  const terraceFrom = r.z;
-  const terrace = 150;
-  r.path(terrace, { width: 6.5, rails: true });
-  for (let i = 0; i < 7; i += 1) {
-    const side = i % 2 === 0 ? -1 : 1;
-    hazard(11, 'dart', {
-      x: r.x + side * 10,
-      y: r.y + 2.6,
-      z: terraceFrom + 14 + i * 19,
-      radius: 2.2,
-      sweep: -side * 20,
-      rate: 2.4,
-      phase: (i * 0.23) % 1,
-    });
-    block(11, 'stone', r.x + side * 10 - 1.5, r.y, terraceFrom + 12 + i * 19, 3, 6, 4);
-  }
-  torchlight(r, terrace, 16);
-  decorate(11, 'arch', r.x, r.y, r.z - 4, 3.4, 0, 0);
-
-  r.path(36, { width: 9, aim: 0 });
-  scatterJungle(r, 11, undefined, { density: 0.9, ruins: 0.8, inset: 12, palms: 0 });
+  colonnade(r, r.z - hallFrom, { spacing: 24, height: 34, broken: 0.3 });
+  for (let i = 0; i < 3; i += 1) guardians(r, hallFrom + 30 + i * 120, 2.2, 20);
+  scatterJungle(r, 11, undefined, { density: 0.7, ruins: 0.8, palms: 0.1, inset: 12 });
 };
 
 /**
  * 12 - HALL OF STATUES.
  *
- * A processional of seven narrow sections, each guarded by a statue whose
- * stone arms reach across the walk, broken by gaps. The arms sweep from the
- * side, so there is always a moment when the near half of the walk is clear
- * and a moment when the far half is: read the arm, pick the half.
+ * A wide hall where the statues' arms sweep the floor, darts, a moving
+ * bridge over a fallen section, and a floor of crushers.
  */
 const hallOfStatues = (r: Route): void => {
-  r.made('stone').over('void');
+  ruins(r);
   const J = r.reach;
-  r.width = 6.5;
+  r.made('stone');
 
-  r.path(30, { aim: 0, rails: true });
+  r.path(40);
   const hallFrom = r.z;
-  for (let i = 0; i < 7; i += 1) {
-    const side = i % 2 === 0 ? -1 : 1;
-    // Long enough to stop on at this speed: the arms are a timing, and a
-    // timing a player cannot stop short of is not one.
-    const length = i % 2 === 0 ? J * 0.75 : J * 0.62;
-    const z = r.z + length / 2;
-    r.path(length, { width: 6.5, aim: r.x + (i % 3 === 0 ? 4 : -4), rails: true });
-    decorate(12, 'statue', r.x + side * 14, r.y, z, 3.2, side > 0 ? -Math.PI / 2 : Math.PI / 2, 0);
-    for (let arm = 0; arm < 4; arm += 1) {
-      hazard(12, 'spinner', {
-        x: r.x + side * 14,
-        y: r.y + 3,
-        z,
-        radius: 2.4,
-        sweep: 5 + arm * 4.2,
-        rate: side * (0.6 + i * 0.04),
-        phase: i * 0.31,
-      });
-    }
-    if (i < 6) r.gap(J * 0.42);
-  }
-  colonnade(r, r.z - hallFrom, { spacing: 20, offset: 22, height: 40, broken: 0.1 });
-  torchlight(r, r.z - hallFrom, 20);
+  r.sweepers(150, { count: 3, rate: 0.9, width: 30 });
+  r.darts(90, { count: 5, period: 2 });
+  movingBridge(r, 3, { gap: J * 0.28, size: J * 0.33, width: 14, travel: 13, rate: 0.2, kind: 'stone' });
+  r.path(40);
+  r.crushers(100, { rows: 4, lanes: 3, period: 2.8 });
+  r.path(40, { aim: 0 });
 
-  r.path(36, { width: 9, aim: 0 });
-  scatterJungle(r, 12, undefined, { density: 0.7, ruins: 1, inset: 24, palms: 0 });
+  colonnade(r, r.z - hallFrom, { spacing: 22, height: 40, broken: 0.15 });
+  torchlight(r, r.z - hallFrom, 24);
+  for (let i = 0; i < 3; i += 1) guardians(r, hallFrom + 25 + i * 50, 3.2, 22);
+  scatterJungle(r, 12, undefined, { density: 0.6, ruins: 1, palms: 0, inset: 14 });
 };
 
 /**
  * 13 - TURNING STONES.
  *
- * Four chasms, each crossed on two stones circling a pillar in the middle.
- * Every chasm is WIDER than a jump: the stones are the only way over. They
- * are sized and paced so one is always coming, and the ledge before each
- * chasm is long enough to stop and watch it.
+ * Two chasms crossed on stones circling a pillar - wider than a jump, so the
+ * stones are the only way - with a rotating arm and a lift between them.
  */
 const turningStones = (r: Route): void => {
-  r.made('ruin').over('void');
+  ruins(r);
   const J = r.reach;
-  r.width = 7;
+  r.made('ruin');
 
-  r.path(30, { aim: 0 });
-  const vaultFrom = r.z;
-  widen(vaultFrom - 8, vaultFrom + 700, 60);
-  pit(13, 'void', -60, 60, vaultFrom, vaultFrom + 700, r.y - 26);
+  r.path(40);
+  const from = r.z;
+  carouselCrossing(r, { across: J * 1.3, size: 18, radius: J * 0.26, rate: 0.8, offset: -5 });
+  r.path(J * 0.8);
+  r.sweepers(90, { count: 2, rate: 1.2 });
+  liftCrossing(r, { gapIn: J * 0.4, size: J * 0.6, width: 18, gapOut: J * 0.35, drop: 0.5, travel: 2.6, rate: 0.2 });
+  r.path(J * 0.8);
+  carouselCrossing(r, { across: J * 1.3, size: 18, radius: J * 0.26, rate: -0.85, offset: 5, phase: 0.3 });
+  r.path(40, { aim: 0, kind: 'stone' });
 
-  const rates = [0.8, -0.85, 0.75, -0.8];
-  for (let i = 0; i < 4; i += 1) {
-    const across = J * 1.3;
-    const hubX = r.x + (i % 2 === 0 ? -5 : 5);
-    const hubZ = r.z + across / 2;
-    const rate = rates[i] as number;
-    r.carousel(hubZ, { x: hubX, y: r.y, size: 12, radius: J * 0.26, rate, phase: i * 0.25, kind: 'stone' });
-    r.carousel(hubZ, { x: hubX, y: r.y, size: 11, radius: J * 0.26, rate, phase: (i * 0.25 + 0.5) % 1, kind: 'stone' });
-    // The pillar is SCENERY, not a solid. A solid pillar top far below the
-    // path is somewhere a falling rider can land and then never jump back up
-    // from - stranded rather than dead.
-    decorate(13, 'stele', hubX, r.y - 30, hubZ, 3.2, 0, 1);
-    decorate(13, 'torch', hubX, r.y - 8, hubZ, 1.3, 0, 0);
-    r.gap(across, { aim: r.x + (i % 2 === 0 ? 3 : -3) });
-    // Each ledge is longer than it takes to stop from full speed, so the
-    // player can arrive, stop, and watch the stones come round.
-    r.path(i < 3 ? J * 0.82 : 30, { width: 7, kind: 'ruin' });
-  }
-  colonnade(r, r.z - vaultFrom, { spacing: 30, offset: 40, height: 46, broken: 0.2 });
-
-  r.path(34, { width: 9, aim: 0, kind: 'stone' });
-  scatterJungle(r, 13, undefined, { density: 0.5, ruins: 1, inset: 44, palms: 0 });
+  colonnade(r, r.z - from, { spacing: 30, offset: 34, height: 46, broken: 0.2 });
+  scatterJungle(r, 13, undefined, { density: 0.5, ruins: 1, palms: 0, inset: 20 });
 };
 
 /**
  * 14 - THE DART CORRIDOR.
  *
- * A roofed corridor six wide, darts firing across it from both walls, stones
- * dropping from the roof, and three places where the floor has fallen through.
- * The roof is high enough to jump under, and the gaps are where a dart and a
- * jump have to be timed together.
+ * A walled passage: rows of darts, a row of crushers, a sand trap in front
+ * of a stone gate, and more darts, faster.
  */
 const dartCorridor = (r: Route): void => {
-  r.made('stone').over('void');
-  const J = r.reach;
-  r.width = 6;
+  ruins(r);
+  r.made('stone');
 
-  r.path(34, { aim: 0, rails: true });
-  const corridorFrom = r.z;
-  const piece = J * 0.5;
-  const pieces = 5;
-  for (let i = 0; i < pieces; i += 1) {
-    r.path(piece, { width: 6, aim: 0 });
-    if (i < pieces - 1) r.gap(J * 0.4);
-  }
-  const length = r.z - corridorFrom;
+  r.path(40);
+  const from = r.z;
+  r.darts(160, { count: 8, period: 1.8 });
+  r.crushers(80, { rows: 2, lanes: 2, period: 2.6 });
+  r.quicksand(50, { islands: 2 });
+  r.gate({ rate: 0.26, hold: 0.5, kind: 'stone' });
+  r.darts(120, { count: 6, period: 1.6 });
+  enclose(r, from, { kind: 'stone', headroom: 20 });
+  torchlight(r, r.z - from, 26);
+  r.path(40, { aim: 0 });
 
-  // Walls and roof down the whole run, gaps included: a corridor that stopped
-  // at every hole would be three short corridors.
-  const segments = Math.round(length / 14);
-  for (let i = 0; i < segments; i += 1) {
-    const z = corridorFrom + (length * i) / segments;
-    for (const side of [-1, 1]) {
-      block(14, 'stone', r.x + side * 5 - (side < 0 ? 8 : 0), r.y - 18, z, 8, 38, length / segments + 0.4);
-    }
-    block(14, 'stone', r.x - 13, r.y + 20, z, 26, 5, length / segments + 0.4);
-  }
-
-  for (let i = 0; i < 16; i += 1) {
-    const side = i % 2 === 0 ? -1 : 1;
-    hazard(14, 'dart', {
-      x: r.x + side * 5,
-      y: r.y + 2.4,
-      z: corridorFrom + 10 + i * (length - 20) / 15,
-      radius: 2,
-      sweep: -side * 10,
-      rate: 2.1,
-      phase: (i * 0.29) % 1,
-    });
-  }
-  for (let i = 0; i < 5; i += 1) {
-    hazard(14, 'faller', {
-      x: r.x,
-      y: r.y,
-      z: corridorFrom + piece * 0.5 + i * (piece + J * 0.4),
-      radius: 4.2,
-      sweep: 15,
-      rate: 2.9,
-      phase: (i * 0.37) % 1,
-    });
-  }
-  torchlight(r, length, 26);
-
-  r.path(36, { width: 9, aim: 0 });
-  scatterJungle(r, 14, undefined, { density: 0.6, ruins: 0.9, inset: 18, palms: 0 });
+  scatterJungle(r, 14, undefined, { density: 0.5, ruins: 0.9, palms: 0, inset: 16 });
 };
 
 /**
  * 15 - COLLAPSING COURT.
  *
- * A narrow court whose floor gives way in a wave that travels diagonally
- * across it. There is no safe tile: every tile falls and comes back, and the
- * wave's shape is the only information. Three jumps long, with each tile up
- * a little over half the time, so a player who lands without reading the
- * wave lands in it. The old court kept every third tile
- * solid, which made it a checkerboard a player could hop across without
- * reading anything.
+ * A court whose floor gives way in a wave that travels diagonally across it:
+ * every tile falls and comes back, and the wave's shape is the only
+ * information. Then rotating arms, a gate, and a moving bridge out.
  */
 const collapsingCourt = (r: Route): void => {
-  r.made('ruin').over('void');
-  r.width = 8;
+  ruins(r);
+  const J = r.reach;
+  r.made('ruin');
 
-  r.path(34, { aim: 0 });
+  r.path(40, { aim: 0 });
   const courtFrom = r.z;
-  const lanes = 3;
-  const rows = 24;
-  const cell = 12;
-  widen(courtFrom - 8, courtFrom + rows * cell + 30, 50);
-  pit(15, 'void', -50, 50, courtFrom, courtFrom + rows * cell + 24, r.y - 24);
-
+  const lanes = 4;
+  const rows = 22;
+  const cell = 11;
+  widen(courtFrom - 8, courtFrom + rows * cell + 30, 60);
+  pit(15, 'void', -60, 60, courtFrom, courtFrom + rows * cell + 24, r.y - 24);
   const laneX = (lane: number): number => r.x + (lane - (lanes - 1) / 2) * cell;
   for (let row = 0; row < rows; row += 1) {
     for (let lane = 0; lane < lanes; lane += 1) {
       mover(15, 'ruin', laneX(lane), r.y, courtFrom + 12 + row * cell, cell - 1.2, cell - 1.2, 'collapse', {
         amount: 30,
         rate: 0.25,
-        phase: (row * 0.09 + lane * 0.33) % 1,
+        phase: (row * 0.09 + lane * 0.25) % 1,
         hold: 0.55,
       });
     }
+    r.markLine(r.x, r.y, courtFrom + 12 + row * cell, (lanes * cell) / 2);
   }
   box(15, 'ruin', r.x, r.y, courtFrom + 4, lanes * cell, 8);
   r.gap(rows * cell + 20, { aim: r.x });
+  r.path(J * 0.6);
+  r.sweepers(90, { count: 2, rate: 1.3, width: 24 });
+  r.gate({ rate: 0.24, hold: 0.5, kind: 'ruin' });
+  r.path(30);
+  movingBridge(r, 2, { gap: J * 0.28, size: J * 0.33, width: 14, travel: 13, rate: 0.21, kind: 'ruin' });
+  r.path(40, { aim: 0, kind: 'stone' });
 
-  colonnade(r, rows * cell + 20, { spacing: 26, offset: 28, height: 34, broken: 0.4 });
-  guardians(r, courtFrom + 115, 3, 32);
+  colonnade(r, r.z - courtFrom, { spacing: 26, offset: 34, height: 34, broken: 0.4 });
+  guardians(r, courtFrom + 115, 3, 34);
   torchlight(r, rows * cell + 20, 34);
-
-  r.path(40, { width: 9, aim: 0, kind: 'stone' });
-  scatterJungle(r, 15, undefined, { density: 1, ruins: 0.7, inset: 30, palms: 0.1 });
+  scatterJungle(r, 15, undefined, { density: 0.8, ruins: 0.7, palms: 0.1, inset: 14 });
 };
 
 export const buildAct3 = (): void => {

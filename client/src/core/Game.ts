@@ -334,12 +334,13 @@ export class Game {
       },
       onStageAwarded: (message) => this.onStageAwarded(message),
       // The ONLY source of the "+N" popups: what the server says it paid.
-      onSpeedAwarded: (message) => this.pops.award(message.steps, message.perStep),
+      onSpeedAwarded: (message) => this.pops.award(message.gain),
     });
 
-    // The room needs to know which Bloxity account this is, or a purchase
-    // fulfilled by webhook has no profile to land in.
-    this.network.setIdentityProvider(() => this.bloxity.getUser()?._id ?? null);
+    // Which Bloxity account this is - as a TOKEN the server verifies with
+    // Bloxity, never an id it would have to take on trust. It decides whose
+    // progress this session holds, and which account a purchase lands in.
+    this.network.setTokenProvider(() => (this.bloxity.getUser() ? this.bloxity.getToken() : null));
     // Asked for at JOIN time rather than pushed after it, so the room has this
     // player's appearance in the very first patch everyone else receives.
     this.network.setLookProvider(() =>
@@ -348,9 +349,14 @@ export class Game {
     // The public half of the identity - a name and a portrait - asked for at
     // JOIN time for the same reason the look is.
     this.network.setProfileProvider(() => identityFromLegion(this.bloxity.getUser()));
-    // A login or a logout mid-session re-labels the player for everyone. The
-    // server re-derives the fallback handle on a sign-out.
-    this.bloxity.onUserChanged(() => this.syncIdentity());
+    // A login or a logout mid-session re-labels the player for everyone, and
+    // moves the LIVE session onto the right profile: the account's on a
+    // sign-in, this browser's own on a sign-out. Unchanged logins are not
+    // re-sent.
+    this.bloxity.onUserChanged(() => {
+      this.syncIdentity();
+      this.network.syncAuth();
+    });
 
     this.run = new RunController(this.world.collision, {
       claimStage: (index) => {
@@ -776,6 +782,7 @@ ${identity.pfp}`;
         lastInputSeq: state.lastInputSeq,
         jumpLatched: state.jumpLatched,
         coyote: state.coyote,
+        sink: state.sink,
       });
     }
 

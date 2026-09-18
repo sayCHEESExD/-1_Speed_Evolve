@@ -1,287 +1,160 @@
-import { block, decorate, hazard, mover, pit, widen } from '../emit.js';
 import { defineStage } from '../stage.js';
 import type { Route } from '../route.js';
-import { colonnade, guardians, scatterCave, scatterJungle, torchlight, waterfall } from './scenery.js';
+import { carouselCrossing, liftCrossing, movingBridge } from './kit.js';
+import { colonnade, enclose, guardians, scatterCave, scatterJungle, torchlight } from './scenery.js';
 
 /**
  * ACT FIVE - THE LOST TEMPLE.
  *
- * The great stair, the flooded vault, the fire hall, the carousel court and
- * the cavern. Six wide, and every crossing is WIDER than a jump unless it is
- * a chain: lifts, sliding platforms and orbiting stones are the only way over,
- * so they are waited for, not ridden past. Every one has a ledge before it
- * longer than it takes to stop from full speed.
- *
- * The old act's crossings were twenty-six and forty-six units wide at a level
- * where a jump carries a hundred and twenty. The moving platforms in them were
- * scenery; the player jumped straight over.
+ * Gold-veined stone and black water, and the temple's own machinery. Floors
+ * eighteen wide, built rather than cut, and every stage is a COMBINATION: a
+ * climb into rolling stone and falling blocks, a flooded vault crossed on a
+ * barge and a lift, a fire-pit way of moving planks and dart rows, the
+ * orbiting carousels, and a cave that holds every trap in the act.
  */
 
-/** Room to stop before a timed crossing at this stage's speed. */
-const runIn = (r: Route): number => r.reach * 0.92;
+const temple = (r: Route): void => {
+  r.over('void');
+  r.fall = 13;
+};
 
 /**
  * 21 - THE GREAT STAIR.
  *
- * Four flights up the temple's face. Each landing is swept by stone arms,
- * and between the flights the stair has fallen away: a lift rising and
- * falling in a gap no jump clears is the only way to the next flight.
+ * A monumental approach: a slope with stone balls rolling down it, falling
+ * blocks on the landing, a stair, a second slope of rolling stone, a gilded
+ * gate, and a lift to the upper terrace.
  */
 const greatStair = (r: Route): void => {
-  r.made('gilded').over('void');
+  temple(r);
   const J = r.reach;
-  r.width = 7;
+  r.made('gilded');
 
-  r.path(36, { aim: 0 });
-  guardians(r, r.z - 20, 4.5, 20);
-  const stairFrom = r.z;
-  widen(stairFrom - 10, stairFrom + 1200, 56);
+  r.path(40);
+  const from = r.z;
+  r.boulderRun(220, { toward: true, drop: 18, count: 5, rate: 50, radius: 4.5, width: 24 });
+  r.crushers(100, { rows: 3, lanes: 2, period: 2.6 });
+  r.stairs(8, 0.8, { run: 9 });
+  r.boulderRun(200, { toward: true, drop: 16, count: 4, rate: 55, radius: 4.5, width: 24 });
+  r.gate({ rate: 0.24, hold: 0.5, kind: 'gilded' });
+  r.path(30);
+  liftCrossing(r, { gapIn: J * 0.4, size: J * 0.6, width: 18, gapOut: J * 0.35, drop: 0.5, travel: 2.6, rate: 0.2, kind: 'gilded' });
+  r.path(40, { aim: 0 });
 
-  for (let i = 0; i < 4; i += 1) {
-    r.stairs(9, 3.4, { run: 8, width: 8 });
-    const landingZ = r.z + J * 0.45;
-    r.path(J * 0.9, { width: 8, aim: i % 2 === 0 ? 6 : -6 });
-    for (let arm = 0; arm < 5; arm += 1) {
-      hazard(21, 'spinner', {
-        x: r.x,
-        y: r.y + 2.8,
-        z: landingZ,
-        radius: 2.6,
-        sweep: 5 + arm * 4,
-        rate: i % 2 === 0 ? 0.6 : -0.55,
-        phase: i * 0.27,
-      });
-    }
-    if (i < 3) {
-      r.path(J * 0.5, { width: 7 });
-      const across = J * 1.2;
-      const from = r.z;
-      r.gap(across);
-      // A third of a jump square: at this speed anything smaller is under
-      // the mount for a tenth of a second.
-      r.lift(from + across / 2, { x: r.x, size: J * 0.3, width: 14, travel: 7, rate: 0.2, phase: i * 0.3, kind: 'gilded' });
-      // Somewhere to come down at speed before the next flight starts.
-      r.path(J * 0.6, { width: 8 });
-    }
-  }
-  colonnade(r, r.z - stairFrom, { spacing: 24, offset: 22, height: 44, broken: 0.12 });
-  torchlight(r, r.z - stairFrom, 26);
-
-  r.path(40, { width: 9, aim: 0 });
-  scatterJungle(r, 21, undefined, { density: 0.6, ruins: 1, inset: 30, palms: 0 });
+  torchlight(r, r.z - from, 30);
+  guardians(r, r.z - 20, 4.5, 22);
+  scatterJungle(r, 21, undefined, { density: 0.6, ruins: 0.8, palms: 0, inset: 12 });
 };
 
 /**
  * 22 - SUNKEN VAULT.
  *
- * Down through the temple floor into a flooded vault: tunnels six wide, and
- * between them a stone slab sliding across the water in a gap no jump clears.
- * The tunnels are roofed, which is what makes the timing honest - there is no
- * jumping high and hoping.
+ * A flooded vault: wade a channel with logs coming across it, cross the deep
+ * water on a barge, ride a lift out of it, and cross a silt bank in front of
+ * a gate.
  */
 const sunkenVault = (r: Route): void => {
-  r.made('stone').over('void');
+  r.over('water', 0.6);
+  r.fall = 13;
   const J = r.reach;
-  r.width = 8;
+  r.made('stone');
 
-  r.path(30, { aim: 0 });
-  const shaftTop = r.y;
-  r.tunnel(40, { width: 8, aim: 8, rise: shaftTop - 16, headroom: 15 });
-  r.tunnel(40, { width: 8, aim: -8, rise: shaftTop - 32, headroom: 15 });
+  r.path(40);
+  const from = r.z;
+  r.ford(150, { current: 12, logs: { count: 4, rate: 18, length: 10 } });
+  r.path(30);
+  r.ferry(J * 1.5, { size: J * 0.45, width: 18, rate: 0.15, kind: 'gilded' });
+  r.path(J * 0.6);
+  // The vault is UNDERGROUND: the channel and the deep water are under its roof.
+  enclose(r, from, { kind: 'cave', headroom: 22, dark: 0.7 });
+  liftCrossing(r, { gapIn: J * 0.4, size: J * 0.6, width: 18, gapOut: J * 0.35, drop: 0.5, travel: 2.6, rate: 0.21, kind: 'gilded' });
+  r.path(J * 0.5);
+  r.quicksand(70, { islands: 3 });
+  r.gate({ rate: 0.22, hold: 0.55, kind: 'stone' });
+  r.path(40, { aim: 0 });
 
-  const vaultFrom = r.z;
-  widen(vaultFrom - 6, vaultFrom + 1200, 48);
-  for (let i = 0; i < 4; i += 1) {
-    const to = i % 2 === 0 ? 8 : -8;
-    r.tunnel(runIn(r), { width: 6, aim: to, headroom: 14, kind: 'stone' });
-    const across = J * 1.15;
-    const from = r.z;
-    r.gap(across);
-    r.shuttle(from + across / 2, { x: r.x, width: 9, length: J * 0.34, travel: 14, rate: 0.19, phase: i * 0.3, kind: 'stone' });
-    pit(22, 'water', r.x - 40, r.x + 40, from - 2, r.z + 2, r.y - 5, 0.2);
-    for (let p = 0; p < 3; p += 1) {
-      block(22, 'stone', r.x + (p - 1) * 16 - 2.5, r.y - 16, from + (across * (p + 0.5)) / 3, 5, 12, 5);
-    }
-  }
-  torchlight(r, r.z - vaultFrom, 24);
-  r.tunnel(44, { width: 9, aim: 0, rise: shaftTop - 16, headroom: 16 });
-  r.path(40, { width: 9, rise: shaftTop, kind: 'gilded' });
-
-  scatterCave(r, 22);
+  colonnade(r, r.z - from, { spacing: 28, height: 40, broken: 0.25 });
+  scatterJungle(r, 22, undefined, { density: 0.6, ruins: 0.6, palms: 0.1, inset: 14 });
 };
 
 /**
  * 23 - THE EMBERWAY.
  *
- * A hall over fire, crossed five times on pairs of slabs sliding across each
- * gap from opposite sides, with a censer swinging over the middle. A gap is a
- * jump and a fifth: slab, then slab, then the far ledge, and the censer
- * decides WHEN.
+ * A way across the temple's fire pits: a moving bridge of gilded slabs over
+ * the fire, a dart row, a span that collapses into the flames, and a floor
+ * of falling blocks.
  */
 const emberway = (r: Route): void => {
-  r.made('gilded').over('fire');
+  r.over('fire');
+  r.fall = 8;
   const J = r.reach;
-  r.width = 7;
+  r.made('stone');
 
-  r.path(34, { aim: 0 });
-  const hallFrom = r.z;
-  widen(hallFrom - 8, hallFrom + 1400, 46);
+  r.path(40);
+  const from = r.z;
+  movingBridge(r, 3, { gap: J * 0.28, size: J * 0.33, width: 16, travel: 12, rate: 0.2, kind: 'gilded' });
+  r.path(J * 0.6);
+  r.darts(120, { count: 6, period: 1.8 });
+  r.collapsing(J * 1.2, { sections: 6, rate: 0.2, hold: 0.62, spread: 0.45, kind: 'gilded' });
+  r.path(J * 0.6);
+  r.crushers(120, { rows: 4, lanes: 2, period: 2.4 });
+  r.path(40, { aim: 0 });
 
-  for (let i = 0; i < 5; i += 1) {
-    r.path(runIn(r), { width: 7, kind: 'gilded', aim: i % 2 === 0 ? -6 : 6 });
-    const across = J * 1.2;
-    const from = r.z;
-    const slab = J * 0.28;
-    const hop = (across - slab * 2) / 3;
-    r.gap(across);
-    pit(23, 'fire', r.x - 46, r.x + 46, from - 2, r.z + 2, r.y - 7);
-    for (const [k, dir] of [
-      [0, 1],
-      [1, -1],
-    ] as const) {
-      mover(
-        23,
-        'gilded',
-        r.x,
-        r.y,
-        from + hop * (k + 1) + slab * (k + 0.5),
-        9,
-        slab,
-        'shuttle',
-        { axis: 'x', amount: 13, rate: 0.24 * dir, phase: i * 0.2 },
-      );
-    }
-    hazard(23, 'swing', {
-      x: r.x,
-      y: r.y + 4,
-      z: from + across / 2,
-      radius: 3.4,
-      sweep: 13,
-      rate: 1.2,
-      phase: i * 0.33,
-    });
-    decorate(23, 'torch', r.x + 18, r.y, from + across / 2, 1.6, 0, 0);
-    decorate(23, 'torch', r.x - 18, r.y, from + across / 2, 1.6, 0, 0);
-  }
-  colonnade(r, r.z - hallFrom, { spacing: 22, offset: 28, height: 38, broken: 0.05 });
-
-  r.path(38, { width: 9, aim: 0 });
-  scatterJungle(r, 23, undefined, { density: 0.5, ruins: 0.9, inset: 34, palms: 0 });
+  torchlight(r, r.z - from, 26);
+  scatterJungle(r, 23, undefined, { density: 0.4, ruins: 1, palms: 0, inset: 14 });
 };
 
 /**
  * 24 - CAROUSEL COURT.
  *
- * A hall with no floor at all, crossed on stones orbiting four pillars in
- * three rings each, with censers swinging between the rings. The pillars'
- * own tops are out of reach now: in the old court they stood level with the
- * path, eight units square, and made a chain of free landings straight down
- * the middle.
+ * The temple's orbiting machinery: sweeping arms across a wide court, two
+ * chasms crossed on turning stones, and a lift.
  */
 const carouselCourt = (r: Route): void => {
-  r.made('gilded').over('void');
+  temple(r);
   const J = r.reach;
-  r.width = 8;
+  r.made('gilded');
 
-  r.path(34, { aim: 0 });
-  r.path(runIn(r) - 34, { width: 7 });
-  const hallFrom = r.z;
-  const hubs = 4;
-  const pitch = J * 0.5;
-  const hallLength = pitch * (hubs + 1);
-  widen(hallFrom - 10, hallFrom + hallLength + 14, 74);
-  pit(24, 'void', -60, 60, hallFrom, hallFrom + hallLength, r.y - 30);
+  r.path(40);
+  const from = r.z;
+  r.sweepers(120, { count: 2, rate: 1.2, width: 30 });
+  carouselCrossing(r, { across: J * 1.3, size: 24, radius: J * 0.26, rate: 0.75, offset: -6, kind: 'gilded' });
+  r.path(J * 0.8);
+  carouselCrossing(r, { across: J * 1.3, size: 24, radius: J * 0.26, rate: -0.8, offset: 6, phase: 0.4, kind: 'gilded' });
+  r.path(J * 0.6);
+  liftCrossing(r, { gapIn: J * 0.4, size: J * 0.6, width: 18, gapOut: J * 0.35, drop: 0.5, travel: 2.6, rate: 0.2, kind: 'gilded' });
+  r.path(40, { aim: 0 });
 
-  for (let hub = 0; hub < hubs; hub += 1) {
-    const hubZ = hallFrom + pitch * (hub + 1);
-    const dir = hub % 2 === 0 ? 1 : -1;
-    // Two rings a pillar, the stones large and slow: this is a court of
-    // jumps between moving landings, and a third ring with censers between
-    // made it a court of guesses.
-    for (let arm = 0; arm < 2; arm += 1) {
-      for (let k = 0; k < 2; k += 1) {
-        mover(24, 'gilded', r.x, r.y, hubZ, 16, 16, 'orbit', {
-          amount: 13 + arm * 14,
-          rate: dir * (0.42 - arm * 0.1),
-          phase: (arm * 0.2 + k * 0.5 + hub * 0.11) % 1,
-        });
-      }
-    }
-    // The pillar is SCENERY, not a solid. A solid pillar top far below the
-    // path is somewhere a falling rider can land and then never jump back up
-    // from - stranded rather than dead.
-    decorate(24, 'stele', r.x, r.y - 30, hubZ, 3.4, 0, 1);
-    decorate(24, 'torch', r.x, r.y - 14, hubZ, 1.6, 0, 0);
-  }
-  for (let i = 0; i < 3; i += 1) {
-    // Over a pillar, where the inner ring passes under it.
-    hazard(24, 'swing', {
-      x: r.x,
-      y: r.y + 5,
-      z: hallFrom + pitch * (i + 1.5),
-      radius: 3.2,
-      sweep: 12,
-      rate: 0.9,
-      phase: i * 0.4,
-    });
-  }
-  r.gap(hallLength, { aim: r.x });
-  colonnade(r, hallLength, { spacing: 26, offset: 56, height: 50, broken: 0.08 });
-  guardians(r, hallFrom + hallLength - 10, 4, 50);
-
-  r.path(40, { width: 9, aim: 0 });
-  scatterJungle(r, 24, undefined, { density: 0.4, ruins: 0.9, inset: 60, palms: 0 });
+  colonnade(r, r.z - from, { spacing: 30, offset: 36, height: 50, broken: 0.1 });
+  torchlight(r, r.z - from, 34);
+  scatterJungle(r, 24, undefined, { density: 0.4, ruins: 1, palms: 0, inset: 20 });
 };
 
 /**
  * 25 - THE DEEP CAVERN.
  *
- * The river's own cave, underneath the temple: roofed passages six wide that
- * weave, stepping stones across the underground river, and rock falling from
- * the roof on the far bank of every crossing.
+ * The cave the river cut under the temple, and every trap in the act inside
+ * it: stalactites dropping, boulders rolling down the cave floor at the
+ * rider, a silt bank, and a lift over a chasm in the dark.
  */
 const deepCavern = (r: Route): void => {
-  r.made('cave').over('void');
+  temple(r);
   const J = r.reach;
-  r.width = 8;
+  r.made('cave');
 
-  r.path(28, { aim: 0, kind: 'stone' });
-  const caveFrom = r.z;
-  const mouth = r.y;
-  r.tunnel(56, { width: 8, aim: -8, rise: mouth - 14, headroom: 16 });
-  pit(25, 'rapids', -34, 34, caveFrom, r.z, r.y - 8, 2.2);
+  r.path(40);
+  const from = r.z;
+  r.crushers(120, { rows: 4, lanes: 2, period: 2.5 });
+  r.boulderRun(200, { toward: true, drop: 12, count: 4, rate: 60, radius: 4 });
+  r.quicksand(60, { islands: 3 });
+  r.path(30);
+  liftCrossing(r, { gapIn: J * 0.4, size: J * 0.6, width: 18, gapOut: J * 0.35, drop: 0.5, travel: 2.6, rate: 0.2, kind: 'cave' });
+  r.path(J * 0.6);
+  enclose(r, from, { kind: 'cave', headroom: 24 });
+  scatterCave(r, 25, r.z - from);
+  r.path(40, { aim: 0, kind: 'stone' });
 
-  for (let i = 0; i < 4; i += 1) {
-    const to = i % 2 === 0 ? 8 : -8;
-    const sectionFrom = r.z;
-    r.tunnel(52, { width: 6, aim: to, rise: r.y - 4, headroom: 14 });
-    // Gap plus twice the landing is comfortably over a jump, so there is a
-    // real takeoff window; gap plus one landing is well under, so there is
-    // an overshoot to avoid.
-    r.hops(3, { gap: J * 0.42, land: J * 0.36, width: 6, jog: 5, kind: 'cave', depth: 5 });
-    r.gap(J * 0.42);
-    r.tunnel(J * 0.5, { width: 7, headroom: 14 });
-    hazard(25, 'faller', {
-      x: r.x,
-      y: r.y,
-      z: r.z - J * 0.25,
-      radius: 4.6,
-      sweep: 11,
-      rate: 2.7,
-      phase: (i * 0.29) % 1,
-    });
-    for (let j = 0; j < 3; j += 1) {
-      decorate(25, 'mushroom', r.x + r.wobble(6), r.y, r.z - 40 + j * 14, 1 + r.next(), 0, j % 2);
-    }
-    pit(25, 'rapids', -34, 34, sectionFrom, r.z, r.y - 8, 2.2);
-  }
-
-  waterfall(r, r.x + 12, r.z + 18, r.y + 34, 36, { width: 12, scale: 2 });
-  r.tunnel(46, { width: 9, aim: 0, rise: r.y + 12, headroom: 20 });
-  r.made('rock');
-  r.path(40, { width: 9, rise: r.y + 8 });
-
-  scatterCave(r, 25);
+  scatterJungle(r, 25, 60, { density: 0.8 });
 };
 
 export const buildAct5 = (): void => {
@@ -291,4 +164,3 @@ export const buildAct5 = (): void => {
   defineStage(24, carouselCourt);
   defineStage(25, deepCavern);
 };
-

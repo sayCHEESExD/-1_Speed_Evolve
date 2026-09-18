@@ -28,8 +28,20 @@ import { upgradePerStep } from './upgrades.js';
 export interface SpeedConfig {
   /** World units of travel that count as one step. */
   readonly strideDistance: number;
-  /** Steps' worth of Speed granted each time the mount leaves the ground. */
-  readonly jumpBonusSteps: number;
+  /**
+   * Steps in one FOOTFALL: the unit the server pays and announces in.
+   *
+   * A step is the unit the RATE is quoted in - the pad's "+1/Steps" - and at
+   * two world units it is a sliver of one stride of the mount's legs. Paid and
+   * announced one step at a time, a level-twelve rider earned nineteen awards
+   * a second, and a player watching one stride of the legs saw a spray of
+   * twenty "+1" popups. A footfall pays the steps it covers as ONE award, of
+   * exactly `footfallSpeedGain`, so one stride on screen is one number.
+   *
+   * It moves how often Speed ARRIVES and nothing about how much: the Speed a
+   * unit of distance pays is the rate over `strideDistance`, as it always was.
+   */
+  readonly footfallSteps: number;
   /**
    * Largest distance the server will credit from a single simulated step.
    *
@@ -78,7 +90,7 @@ export interface SpeedConfig {
 
 export const SPEED: SpeedConfig = {
   strideDistance: 2,
-  jumpBonusSteps: 2,
+  footfallSteps: 6,
   creditSlack: 1.6,
   levelStep: 5,
   levelKnee: 9,
@@ -306,6 +318,19 @@ export const totalMultiplier = (inputs: GainInputs): number =>
 
 /** Speed granted for ONE step. A view onto `calculateSpeedGain`. */
 export const speedPerStep = (inputs: GainInputs): number => calculateSpeedGain(inputs).gain;
+
+/** World units of travel in one footfall - the distance one award stands for. */
+export const FOOTFALL_DISTANCE = SPEED.strideDistance * SPEED.footfallSteps;
+
+/**
+ * Speed paid for ONE footfall: the gain of every step it covers, as one sum.
+ *
+ * The number on a popup. Still a view onto `calculateSpeedGain` - nothing
+ * about the player enters here that did not enter there - so it is the same
+ * figure for every footfall a given setup takes.
+ */
+export const footfallSpeedGain = (breakdown: SpeedGainBreakdown): number =>
+  breakdown.gain * SPEED.footfallSteps;
 
 /**
  * One line a person can check by hand:

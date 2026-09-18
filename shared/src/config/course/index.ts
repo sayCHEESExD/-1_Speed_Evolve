@@ -17,7 +17,7 @@ import {
   territories,
   wideAreas,
 } from './emit.js';
-import { COURSE } from './metrics.js';
+import { COURSE, WIN_PAD } from './metrics.js';
 import { courseEndZ } from './stage.js';
 import type { PitRegion, StageDefinition, SurfaceRegion } from './types.js';
 
@@ -83,9 +83,12 @@ export const stageAt = (z: number): StageDefinition | null => {
  * finished the stage.
  */
 export const winPadAt = (x: number, y: number, z: number): StageDefinition | null => {
+  // The plate's own footprint plus a hair, from the one definition of it.
+  const halfX = WIN_PAD.width / 2 + 0.4;
+  const halfZ = WIN_PAD.length / 2 + 0.4;
   for (const stage of stages) {
-    if (Math.abs(x - stage.winPadX) > 6.4) continue;
-    if (Math.abs(z - stage.winPadZ) > 6.4) continue;
+    if (Math.abs(x - stage.winPadX) > halfX) continue;
+    if (Math.abs(z - stage.winPadZ) > halfZ) continue;
     if (y < stage.winPadY - 3 || y > stage.winPadY + 6) continue;
     return stage;
   }
@@ -159,7 +162,7 @@ export const caveDepthAt = (z: number): number => {
 
 export * from './types.js';
 export * from './motion.js';
-export { COURSE, ACTS, STAGE_TUNING, WIN_PAD, actOf, stageReward } from './metrics.js';
+export { COURSE, ACTS, QUICKSAND, STAGE_TUNING, WIN_PAD, actOf, stageReward, type QuicksandTuning } from './metrics.js';
 export {
   BOARDS,
   BOARD_ROW,

@@ -87,9 +87,34 @@ export const platformOffsetAt = (
       return out;
     }
 
+    case 'gate': {
+      out.y = solid.amount * gateOpennessAt(solid, time);
+      return out;
+    }
+
     default:
       return out;
   }
+};
+
+/** Fraction of a gate's cycle spent lifting, and again spent dropping. */
+const GATE_SWING = 0.07;
+
+/**
+ * How open a timed gate is, 0 shut to 1 fully lifted.
+ *
+ * Exported for the renderer, which shows the warning before it drops from the
+ * same curve the collision uses. Shut for `hold` of the cycle, then a quick
+ * lift, a long stretch open, and a quick drop - so "open" and "shut" are both
+ * states a player can see and plan around rather than a gate always moving.
+ */
+export const gateOpennessAt = (solid: MovingSolid, time: number): number => {
+  if (solid.motion !== 'gate') return 0;
+  const t = cycle(time, solid.rate, solid.phase);
+  if (t < solid.hold) return 0;
+  if (t < solid.hold + GATE_SWING) return ease((t - solid.hold) / GATE_SWING);
+  if (t < 1 - GATE_SWING) return 1;
+  return ease((1 - t) / GATE_SWING);
 };
 
 /**
@@ -155,8 +180,12 @@ export const hazardPositionAt = (
       // The previous game's roller stayed level; on a sloped, curving path
       // that read as a ball hovering above the ground it was supposed to be
       // rolling down.
+      // The period is the whole PATH over the speed, not just its Z. A boulder
+      // rolling across the route has no Z span at all, and timing it by Z
+      // alone gave it a period of nothing.
       const span = hazard.toZ - hazard.fromZ;
-      const period = Math.abs(span) / Math.max(1e-3, hazard.rate);
+      const period =
+        Math.max(1, Math.hypot(span, hazard.driftX)) / Math.max(1e-3, hazard.rate);
       const t = (((time / period + hazard.phase) % 1) + 1) % 1;
       out.z = hazard.fromZ + span * t;
       out.y = hazard.fromY + (hazard.toY - hazard.fromY) * t;
@@ -201,6 +230,15 @@ export const hazardPositionAt = (
       return out;
     }
 
+    case 'vine': {
+      // Swings like a pendulum but stays a full-height column, so it sweeps
+      // across the path rather than dipping under a jump.
+      out.x = hazard.x + Math.sin(time * hazard.rate + hazard.phase * TAU) * hazard.sweep;
+      out.y = hazard.y;
+      out.z = hazard.z;
+      return out;
+    }
+
     case 'cascade':
     default:
       // A falling column of water does not move. It is a hazard rather than a
@@ -240,10 +278,14 @@ export const fallerLiftAt = (hazard: CourseHazard, time: number): number => {
  * travel - and code that assumed one meaning bucketed crushers as if they hung
  * through the valley wall.
  */
-export const hazardReachX = (hazard: CourseHazard): number => {
+export const hazardReachX = (hazard: CourseHazard): number =>
+  hazardReachXCore(hazard) + hazard.spanX;
+
+const hazardReachXCore = (hazard: CourseHazard): number => {
   switch (hazard.kind) {
     case 'swing':
     case 'spinner':
+    case 'vine':
       return Math.abs(hazard.x) + hazard.sweep + hazard.radius;
     case 'dart':
       // A dart travels FROM `x` TO `x + sweep`, so its extremes are those two
@@ -280,9 +322,15 @@ export const hazardZRange = (hazard: CourseHazard): { minZ: number; maxZ: number
  * `sweep`, and testing it as a sphere would let a player ride straight through
  * the bottom of a waterfall.
  */
-export const hazardHalfHeight = (hazard: CourseHazard): number =>
-  hazard.kind === 'cascade' ? hazard.sweep / 2 : hazard.radius;
+export const hazardHalfHeight = (hazard: CourseHazard): number => {
+  if (hazard.kind === 'cascade') return hazard.sweep / 2;
+  if (hazard.kind === 'vine') return Math.max(0.5, (hazard.y - hazard.fromY) / 2);
+  return hazard.radius;
+};
 
 /** Centre Y of a hazard's kill volume, given where `hazardPositionAt` put it. */
-export const hazardCentreY = (hazard: CourseHazard, y: number): number =>
-  hazard.kind === 'cascade' ? y - hazard.sweep / 2 : y;
+export const hazardCentreY = (hazard: CourseHazard, y: number): number => {
+  if (hazard.kind === 'cascade') return y - hazard.sweep / 2;
+  if (hazard.kind === 'vine') return y - hazardHalfHeight(hazard);
+  return y;
+};

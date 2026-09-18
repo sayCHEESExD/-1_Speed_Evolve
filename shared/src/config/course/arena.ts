@@ -81,23 +81,24 @@ export const UPGRADE_ROW: {
    * side, and a bank that ran all the way forward would put a staircase in
    * their customers' way and the traders in front of the bank's end plates.
    */
-  frontX: 48,
-  backX: 70,
+  frontX: 60,
+  backX: 82,
   firstZ: -164,
   spacingZ: 16,
   perRow: UPGRADE_COUNT / 2,
   size: 9,
   height: 0.45,
   terraceY: 7,
-  terraceMinX: 60,
+  terraceMinX: 72,
   /**
-   * Well short of the camp's side wall, which begins at 117.
+   * Well short of the camp's side wall, which begins at 117: twenty-seven
+   * units, enough for the treeline's inner rank at 104 to stand clear of it.
    *
    * The band between them is the jungle's. A terrace that once ran into the
    * wall left their two undersides coplanar - a hundred square units of
    * duplicate surface for a unit of width nobody could stand on.
    */
-  terraceMaxX: 78,
+  terraceMaxX: 90,
   /**
    * How close the mount must be to equip.
    *
