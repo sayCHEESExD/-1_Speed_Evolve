@@ -15,10 +15,10 @@ export type RebirthResult =
 /**
  * Server authority over rebirths.
  *
- * A rebirth trades the current level curve for a bigger Speed-gain
- * multiplier. There is no level cap to raise: a player may ride past the
- * requirement for as long as they like, and the rebirth waits for them. What it must NOT touch is anything the
- * player earned OUTSIDE that curve: Wins, evolved mounts, owned trails and
+ * A rebirth trades the current level curve for a max level twenty-five
+ * higher - `(rebirths + 1) x 25`, with no ceiling and no limit on how many
+ * times - and a bigger Speed-gain multiplier. What it must NOT touch is
+ * anything the player earned OUTSIDE that curve: Wins, evolved mounts, owned trails and
  * owned auras are permanent unlocks and survive untouched.
  *
  * The equipped upgrade PAD is the one deliberate exception, and it is reset to
@@ -34,7 +34,7 @@ export type RebirthResult =
  * could be wrong and nothing to validate.
  */
 export class RebirthService {
-  /** True once the player has reached the next rebirth's level. */
+  /** True once the player has reached their current max level. */
   isEligible(player: PlayerState): boolean {
     return canRebirth(player.level, player.rebirths);
   }
@@ -48,7 +48,7 @@ export class RebirthService {
    * Perform a rebirth.
    *
    * Resets the level curve and everything derived from it, returns the player
-   * to the free upgrade pad, raises the multiplier, and
+   * to the free upgrade pad, raises the cap and the multiplier, and
    * deliberately leaves Wins, mounts, trails and auras alone.
    */
   rebirth(player: PlayerState, speeds: SpeedService): RebirthResult {
@@ -62,8 +62,8 @@ export class RebirthService {
     player.level = 1;
     player.upgradeSlot = STARTER_UPGRADE_SLOT;
 
-    // Movement speed, jump velocity and the level all re-derive through the
-    // one formula rather than being written here.
+    // Movement speed, jump velocity, the level and the cap all re-derive
+    // through the one formula rather than being written here.
     speeds.syncDerived(player);
 
     return {

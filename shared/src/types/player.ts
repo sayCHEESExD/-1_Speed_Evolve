@@ -79,6 +79,8 @@ export interface PlayerProgression {
   moveMultiplier: number;
   /** Authoritative jump velocity, resolved by the same one formula. */
   jumpVelocity: number;
+  /** Highest level reachable at the current rebirth: `(rebirths + 1) x 25`. */
+  maxLevel: number;
   /**
    * Speed granted per step: the upgrade pad's base times every multiplier.
    *

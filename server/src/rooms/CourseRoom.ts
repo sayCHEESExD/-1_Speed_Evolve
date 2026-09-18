@@ -1144,6 +1144,7 @@ const resetProgression = (player: PlayerState): void => {
   player.upgradeSlot = fresh.upgradeSlot;
   player.bestStage = fresh.bestStage;
   player.level = fresh.level;
+  player.maxLevel = fresh.maxLevel;
 };
 
 /**

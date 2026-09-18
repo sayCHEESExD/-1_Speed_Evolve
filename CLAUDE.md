@@ -155,15 +155,14 @@ on purpose. `verify:progression` asserts both halves of this.
   the "impossible" end of the scale rather than the demanding one.
   `verify:progression` prints the cost of levels 10 through 200 against the
   curve it replaced, and that table is the thing to read when changing it.
-- **THERE IS NO LEVEL CAP, and the curve never saturates.** Every level costs
-  1.06 times the one before it, for ever. The curve used to be clamped at
-  `MAX_SAFE_INTEGER`, which froze it at level 460, and the level was also
-  capped at the next rebirth's requirement; both are gone. The only end is
-  arithmetic: the running total passes `Number.MAX_VALUE` (~1e308) around
-  level 11,950. `clampSpeed` SATURATES there rather than overflowing, because
-  an `Infinity` total would otherwise read as invalid and reset to zero.
-  Levels past ~800 cost over 1e20 each, so an award is a vanishing fraction of
-  the total long before that end - precision thins out, the curve does not.
+- **THE CURVE HAS NO CEILING.** Every level costs 1.06 times the one before
+  it, for ever. It used to be clamped at `MAX_SAFE_INTEGER`, which froze it at
+  level 460; that is gone. The only end is arithmetic: the running total
+  passes `Number.MAX_VALUE` (~1e308) around level 11,950. `clampSpeed`
+  SATURATES there rather than overflowing, because an `Infinity` total would
+  otherwise read as invalid and reset to zero. Levels past ~800 cost over 1e20
+  each, so an award is a vanishing fraction of the total long before that end
+  - precision thins out, the curve does not.
 - `totalSpeedToReach` is a **TABLE**, not a formula, and it has to be: the
   per-level cost is rounded, so the running total is a sum of rounded terms.
   Building the table out of `speedForNextLevel` is also what guarantees the two
@@ -178,10 +177,17 @@ on purpose. `verify:progression` asserts both halves of this.
   curve reaches returning players rather than only new ones. Retuning it moves
   everybody's level the next time they join - that is correct, and it is worth
   knowing before you touch 1.06.
-- Reaching the next rebirth's level UNLOCKS it and stops nothing: a player
-  may keep levelling past it for as long as they like, and the rebirth waits.
-  There is no `maxLevel` on the wire any more. The rebirth panel shows what a
-  rebirth trades - the current level for level 1 - rather than a cap to raise.
+- The level CAP is `(rebirths + 1) x 25` - 25, 50, 75, 100 ... 475 at
+  eighteen rebirths - and it is not a constant: it is whatever the next
+  rebirth requires (`maxLevelForRebirth`, read off the ladder), so reaching
+  the cap and unlocking a rebirth are the same moment. A cap is a gate, never
+  a dead end. Speed keeps banking past it; the level waits for the rebirth.
+- **There is no MAXIMUM level and no MAXIMUM rebirth count.** Nothing clamps
+  the cap and the ladder never runs out. `level`, `rebirths` and `maxLevel`
+  are `float64` on the wire for that reason - a `uint32` wraps at
+  4,294,967,295, and a wrapped cap silently drops a player's ceiling to
+  nothing. `verify:progression` checks the formula at every count to 100,000
+  and past uint32, and rebirths forty times in a row.
 - `REBIRTH_TIERS` is the authored head (level 25 → x2, level 50 → x3) and
   `EXTENSION` continues the same pattern for ever.
 - A rebirth resets the level curve - which means clearing `totalSpeed`,
@@ -929,7 +935,7 @@ the tile count is.
   like a different state at 40% and at 90%.
 - **Large figures are COMPACT, and `formatSpeed` is the only place that
   decides so**: 1K, 2.5K, 100K, 1M, 1B, 1T, and never a trailing `.0`.
-  Levels are uncapped, so the suffixes are GENERATED - the short-scale names
+  Nothing has a ceiling, so the suffixes are GENERATED - the short-scale names
   Qa, Qi, Sx ... Dc, UDc ... Vg ... Ce, UCe - all the way to float64's end. Speed,
   Wins, shop prices, pad rates, popups and the leaderboards all go through it,
   so the game cannot abbreviate in two styles depending on where you look. The

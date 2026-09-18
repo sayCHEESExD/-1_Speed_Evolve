@@ -2,9 +2,9 @@
  * Rebirth: the prestige ladder.
  *
  * Ported from the previous game's rebirth system and kept behaviourally
- * identical - a rebirth trades the current level curve for a bigger multiplier,
- * and deliberately leaves everything the
- * player earned OUTSIDE that curve alone. Wins and owned animals are permanent
+ * identical - a rebirth trades the current level curve for a max level
+ * twenty-five higher and a bigger multiplier, and deliberately leaves
+ * everything the player earned OUTSIDE that curve alone. Wins and owned animals are permanent
  * unlocks and survive a rebirth untouched.
  *
  * Data-driven: `REBIRTH_TIERS` is the authored head of the ladder and
@@ -69,11 +69,21 @@ export const rebirthMultiplier = (count: number): number => {
 };
 
 /**
- * A player may rebirth once they have REACHED the next rung's level.
+ * Highest level reachable at this rebirth count: `(rebirths + 1) x 25`.
  *
- * Reaching it is a door, not a wall: there is no level cap, so a player who
- * would rather keep climbing than reset may ride on past it for as long as
- * they like, and the rebirth waits for them.
+ * 25 before the first rebirth, 50 after it, 475 after eighteen, and on by
+ * twenty-five for ever. It is exactly the level the NEXT rebirth needs, which
+ * is what makes reaching the cap and unlocking the rebirth the same moment -
+ * the cap is a gate, never a dead end.
+ *
+ * Read off the ladder rather than written as its own formula, so the cap and
+ * the requirement cannot drift apart; `verify:progression` checks that the
+ * ladder does produce `(rebirths + 1) x 25`. There is deliberately NO clamp
+ * here and no maximum rebirth count anywhere: the fields that carry these on
+ * the wire are float64, so neither wraps.
  */
+export const maxLevelForRebirth = (count: number): number => nextRebirthTier(count).requiredLevel;
+
+/** A player may rebirth once they have reached their current max level. */
 export const canRebirth = (level: number, count: number): boolean =>
-  Math.floor(level) >= nextRebirthTier(count).requiredLevel;
+  Math.floor(level) >= maxLevelForRebirth(count);

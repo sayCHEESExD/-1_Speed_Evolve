@@ -6,6 +6,7 @@ import {
   clampSpeed,
   describeSpeedGain,
   footfallSpeedGain,
+  maxLevelForRebirth,
   resolveLevel,
   resolveMovementProfile,
   speedForNextLevel,
@@ -94,6 +95,7 @@ export class SpeedService {
   private readonly lastLogged = new Map<string, string>();
 
   initialise(player: PlayerState): void {
+    player.maxLevel = this.levelCap(player);
     this.syncDerived(player);
     this.reset(player.sessionId, player);
   }
@@ -216,7 +218,8 @@ export class SpeedService {
    * follow from it through the same formulas a live step uses.
    */
   syncDerived(player: PlayerState): void {
-    player.level = resolveLevel(player.totalSpeed).level;
+    player.maxLevel = this.levelCap(player);
+    player.level = resolveLevel(player.totalSpeed, player.maxLevel).level;
 
     // Replicated so the HUD prints exactly the figures the server pays, rather
     // than a client's own reconstruction of them. Both are fields of the SAME
@@ -296,5 +299,9 @@ export class SpeedService {
       ? Math.max(0, Math.min(stepSeconds, MAX_SIM_DELTA))
       : MAX_SIM_DELTA;
     return this.movementProfile(player).runSpeed * step * SPEED.creditSlack + 0.5;
+  }
+
+  private levelCap(player: PlayerState): number {
+    return maxLevelForRebirth(player.rebirths);
   }
 }

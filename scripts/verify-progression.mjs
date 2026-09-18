@@ -36,6 +36,7 @@ import {
   mountForSlot,
   MOUNTS,
   MOVING_SOLIDS,
+  maxLevelForRebirth,
   nextRebirthTier,
   platformOffsetAt,
   qualifiesForMount,
@@ -507,6 +508,26 @@ console.log('rebirth');
 
   check('rebirth 1 needs level 25', nextRebirthTier(0).requiredLevel, 25);
   check('rebirth 2 needs level 50', nextRebirthTier(1).requiredLevel, 50);
+  check('level cap is the next rebirth requirement', player.maxLevel, 25);
+  // The cap is `(rebirths + 1) x 25` at EVERY count - no table end, no
+  // maximum rebirth count, and nothing that saturates or wraps. 4294967296 is
+  // the first count a uint32 could not have carried.
+  {
+    let exact = true;
+    for (let n = 0; n <= 100000; n += 1) {
+      if (maxLevelForRebirth(n) !== (n + 1) * 25) exact = false;
+      if (nextRebirthTier(n).requiredLevel !== (n + 1) * 25) exact = false;
+    }
+    for (const n of [4294967295, 4294967296, 1e12, 1e15]) {
+      if (maxLevelForRebirth(n) !== (n + 1) * 25) exact = false;
+    }
+    check('  and it is (rebirths + 1) x 25 at every count, beyond uint32 too', exact, true);
+  }
+  check('  rebirth 0 -> 25', maxLevelForRebirth(0), 25);
+  check('  rebirth 1 -> 50', maxLevelForRebirth(1), 50);
+  check('  rebirth 2 -> 75', maxLevelForRebirth(2), 75);
+  check('  rebirth 3 -> 100', maxLevelForRebirth(3), 100);
+  check('  rebirth 18 -> 475', maxLevelForRebirth(18), 475);
   check('a level-1 player may not rebirth', rebirths.isEligible(player), false);
   check('  and the request is refused', rebirths.rebirth(player, speeds).ok, false);
 
@@ -523,9 +544,8 @@ console.log('rebirth');
   check('level 24 is not enough', rebirths.isEligible(player), false);
   player.totalSpeed = 1e9;
   speeds.syncDerived(player);
-  // NO CAP: a billion Speed is well past level 25, and the level says so.
-  check('the level is not capped at the requirement', player.level > 25, true);
-  check('  and the level is the curve\'s own', player.level, resolveLevel(1e9).level);
+  check('capped at level 25', player.level, 25);
+  check('  though the curve alone would say more', resolveLevel(1e9).level > 25, true);
   check('now eligible', rebirths.isEligible(player), true);
 
   const done = rebirths.rebirth(player, speeds);
@@ -533,6 +553,7 @@ console.log('rebirth');
   check('  level reset to 1', player.level, 1);
   check('  Speed reset to 0', player.totalSpeed, 0);
   check('  rebirth count is 1', player.rebirths, 1);
+  check('  cap raised to 50', player.maxLevel, 50);
   check('  the next rebirth needs level 50', rebirths.requiredLevel(player), 50);
   check('  the gain multiplier includes x2', done.multiplier, 2);
   check('  Wins survived', player.wins, 137);
@@ -545,6 +566,43 @@ console.log('rebirth');
   // Movement comes from LEVEL alone now, so a rebirth genuinely makes the
   // player slower on foot - and faster at earning, which is the trade.
   check('  movement is back to the level-1 speed', player.moveMultiplier, 1);
+
+  // Rebirthing FOREVER: forty rebirths in a row, each earned at exactly its
+  // own cap, then counts past anything a uint32 could hold.
+  {
+    let ladder = true;
+    for (let n = 1; n <= 40; n += 1) {
+      const cap = (n + 1) * 25;
+      if (player.maxLevel !== cap) ladder = false;
+      player.totalSpeed = totalSpeedToReach(cap - 1);
+      speeds.syncDerived(player);
+      if (rebirths.isEligible(player)) ladder = false;
+      player.totalSpeed = totalSpeedToReach(cap);
+      speeds.syncDerived(player);
+      if (player.level !== cap || !rebirths.isEligible(player)) ladder = false;
+      player.totalSpeed = totalSpeedToReach(cap + 40);
+      speeds.syncDerived(player);
+      if (player.level !== cap) ladder = false;
+      if (!rebirths.rebirth(player, speeds).ok) ladder = false;
+    }
+    check('forty consecutive rebirths each unlock at (n + 1) x 25', ladder, true);
+    check('  leaving rebirth 41 with a cap of 1050', player.maxLevel, 1050);
+
+    player.rebirths = 400;
+    player.totalSpeed = totalSpeedToReach(401 * 25);
+    speeds.syncDerived(player);
+    check('at rebirth 400 the cap is 10025', player.maxLevel, 10025);
+    check('  and it is reachable', player.level, 10025);
+    check('  and it can be rebirthed out of', rebirths.rebirth(player, speeds).ok, true);
+    check('  to rebirth 401', player.rebirths, 401);
+
+    player.rebirths = 4294967296;
+    speeds.syncDerived(player);
+    check('past uint32 the cap is still exact', player.maxLevel, 4294967297 * 25);
+    player.rebirths += 1;
+    speeds.syncDerived(player);
+    check('  and a further rebirth raises it by 25', player.maxLevel, 4294967298 * 25);
+  }
 }
 
 console.log('the three shops');
@@ -873,11 +931,12 @@ console.log('speed and levels');
   speeds.credit('test', player, 1 / 60);
   check('a teleport pays nothing', player.totalSpeed, beforeTeleport);
 
-  // Movement speed rises with LEVEL and with nothing else. There is no level
-  // cap, so a huge Speed total lands wherever the curve puts it.
+  // Movement speed rises with LEVEL and with nothing else. The cap before any
+  // rebirth is level 25, so that is where a huge Speed total lands - getting
+  // past it is what the rebirth ladder is FOR.
   player.totalSpeed = 1e9;
   speeds.syncDerived(player);
-  check('a huge Speed total is not capped', player.level, resolveLevel(1e9).level);
+  check('a huge Speed total caps at the pre-rebirth level', player.level, 25);
 
   const atLevel1 = resolveMovementProfile(1).multiplier;
   const atLevel = resolveMovementProfile(player.level).multiplier;
@@ -897,9 +956,9 @@ console.log('speed and levels');
   player.auraSlot = 11; // Rainbow, x300
   player.rebirths = 9;
   speeds.syncDerived(player);
-  check('a 400x trail does not change movement speed', player.moveMultiplier, before);
-  // Nor do nine rebirths: with no level cap to raise, the level - and so the
-  // movement - is exactly where the Speed total already put it.
+  check('a 400x trail does not change movement speed', player.moveMultiplier > before, true);
+  // (It rose only because the rebirth raised the level CAP, which raised the
+  // level. Pinning the level proves the cosmetics contribute nothing.)
   const pinned = resolveMovementProfile(player.level).multiplier;
   check('  movement is a pure function of level', player.moveMultiplier, pinned);
   check('  but the gain multiplier is enormous', player.totalMultiplier > 1e6, true);
@@ -1099,7 +1158,7 @@ console.log('deterministic Speed gain');
     check(
       '  and the level is read off that accumulated total',
       player.level,
-      resolveLevel(player.totalSpeed).level,
+      resolveLevel(player.totalSpeed, player.maxLevel).level,
     );
   }
 

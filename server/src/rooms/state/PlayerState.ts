@@ -112,12 +112,18 @@ export class PlayerState extends Schema {
   accountName = '';
 
   /** Server-authoritative progression. */
-  @type('uint32') level = 1;
   /**
-   * Rebirths performed. `uint32`, not `uint16`: the ladder has no end, and at
-   * `uint16` rebirth 65536 would wrap to zero and take the level cap with it.
+   * `float64`, like `rebirths` and `maxLevel`: none of the three has a
+   * maximum. A `uint32` would wrap at 4,294,967,295, and a wrapped level cap
+   * silently drops a player's ceiling to nothing.
    */
-  @type('uint32') rebirths = 0;
+  @type('float64') level = 1;
+  /**
+   * Rebirths performed. There is no maximum rebirth count: the ladder continues
+   * by `+25 levels` a rung for ever, so the field is a `float64` rather than an
+   * integer type that would one day wrap to zero and take the cap with it.
+   */
+  @type('float64') rebirths = 0;
   /**
    * Stage wins. Awarded by StageService and spent by the two shops, always
    * through `Wallet`. Never read from a client.
@@ -169,6 +175,12 @@ export class PlayerState extends Schema {
    */
   @type('float32') moveMultiplier = 1;
   @type('float32') jumpVelocity = 25;
+
+  /**
+   * Level cap for the current rebirth: `(rebirths + 1) x 25`. Derived by
+   * `SpeedService`, never stored; `float64` so it has no ceiling of its own.
+   */
+  @type('float64') maxLevel = 25;
 
   /** Highest stage (1-based) ever banked. 0 before the first finish. */
   @type('uint32') bestStage = 0;

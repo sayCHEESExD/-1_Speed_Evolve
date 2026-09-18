@@ -124,7 +124,9 @@ export const speedForNextLevel = (level: number): number => {
  * `CUMULATIVE[i]` is the lifetime Speed needed to have reached level `i + 1`,
  * so entry zero is zero: level 1 is free.
  *
- * There is NO LEVEL CAP, so the table has no fixed length: it is extended only
+ * The curve itself has NO CEILING - the only cap is the rebirth's, which
+ * grows by twenty-five a rebirth for ever - so the table has no fixed
+ * length: it is extended only
  * as far as somebody's Speed actually reaches, a row at a time. It stops only
  * where the sum stops being a number at all - past `Number.MAX_VALUE`, around
  * level twelve thousand, which is ~1e308 Speed. That row is stored as
@@ -173,6 +175,8 @@ export interface LevelProgress {
   readonly required: number;
   /** 0..1 fill for the level bar. */
   readonly fraction: number;
+  /** True when the rebirth's level cap has been reached and the bar is full. */
+  readonly capped: boolean;
 }
 
 /**
@@ -189,8 +193,11 @@ export interface LevelProgress {
  * either way, and a search over the same integers the requirements were summed
  * from has no boundary to settle.
  */
-export const resolveLevel = (totalSpeed: number): LevelProgress => {
+export const resolveLevel = (totalSpeed: number, levelCap = Infinity): LevelProgress => {
   const total = Number.isFinite(totalSpeed) ? Math.max(0, totalSpeed) : 0;
+  // The rebirth cap, `(rebirths + 1) x 25`. It has no ceiling of its own: an
+  // absent or huge one simply leaves the curve to decide.
+  const cap = Number.isNaN(levelCap) ? Infinity : Math.max(1, Math.floor(levelCap));
   extendPastTotal(total);
 
   // The highest index whose cumulative cost this total covers.
@@ -203,6 +210,13 @@ export const resolveLevel = (totalSpeed: number): LevelProgress => {
   }
   const level = lo + 1;
 
+  if (level >= cap) {
+    // Speed keeps banking past the cap - it is lifetime Speed, and the
+    // leaderboard counts it - but the level waits for the rebirth.
+    const required = speedForNextLevel(cap);
+    return { level: cap, into: required, required, fraction: 1, capped: true };
+  }
+
   const required = speedForNextLevel(level);
   const into = total - (CUMULATIVE[lo] as number);
   return {
@@ -210,6 +224,7 @@ export const resolveLevel = (totalSpeed: number): LevelProgress => {
     into,
     required,
     fraction: required > 0 && Number.isFinite(required) ? Math.min(Math.max(into / required, 0), 1) : 0,
+    capped: false,
   };
 };
 

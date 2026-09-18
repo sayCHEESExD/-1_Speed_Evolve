@@ -1,4 +1,9 @@
-import { nextRebirthTier, rebirthMultiplier } from '@evolve/shared';
+import {
+  formatSpeed,
+  maxLevelForRebirth,
+  nextRebirthTier,
+  rebirthMultiplier,
+} from '@evolve/shared';
 import { ICONS } from './hudStyles.js';
 import { Panel } from './Panel.js';
 
@@ -88,7 +93,7 @@ export class RebirthPanel extends Panel {
 
   /** True when the server would accept a rebirth right now. */
   get isEligible(): boolean {
-    return this.level >= nextRebirthTier(this.rebirths).requiredLevel;
+    return this.level >= maxLevelForRebirth(this.rebirths);
   }
 
   protected override onOpened(): void {
@@ -124,21 +129,34 @@ export class RebirthPanel extends Panel {
   private render(): void {
     const tier = nextRebirthTier(this.rebirths);
     const eligible = this.isEligible;
+    const cap = maxLevelForRebirth(this.rebirths);
 
     // "Speed: x2", matching the reference art's wording exactly - the colon is
     // what makes the card read as a reading rather than as a product name.
-    this.beforeSpeed.textContent = `Speed: x${rebirthMultiplier(this.rebirths)}`;
-    this.afterSpeed.textContent = `Speed: x${tier.multiplier}`;
-    // There is no level cap to raise, so the level row shows what a rebirth
-    // actually trades: the level the player is at now, for level 1.
-    this.beforeLevel.textContent = `Level ${this.level}`;
-    this.afterLevel.textContent = 'Level 1';
+    this.beforeSpeed.textContent = `Speed: x${figure(rebirthMultiplier(this.rebirths))}`;
+    this.afterSpeed.textContent = `Speed: x${figure(tier.multiplier)}`;
+    // `(rebirths + 1) x 25` on both sides, for as many rebirths as anybody
+    // performs: 25 -> 50, then +25 a rebirth for ever.
+    this.beforeLevel.textContent = `Max Level ${figure(cap)}`;
+    this.afterLevel.textContent = `Max Level ${figure(maxLevelForRebirth(this.rebirths + 1))}`;
 
-    const shown = Math.min(this.level, tier.requiredLevel);
-    this.barFill.style.width = `${Math.min(Math.max(shown / tier.requiredLevel, 0), 1) * 100}%`;
-    this.barLabel.textContent = `Level ${shown}/${tier.requiredLevel}`;
+    const shown = Math.min(this.level, cap);
+    this.barFill.style.width = `${Math.min(Math.max(shown / cap, 0), 1) * 100}%`;
+    this.barLabel.textContent = `Level ${figure(shown)}/${figure(tier.requiredLevel)}`;
 
     this.action.disabled = !eligible;
-    this.action.textContent = eligible ? 'Rebirth' : `Level ${tier.requiredLevel} required`;
+    this.action.textContent = eligible ? 'Rebirth' : `Level ${figure(tier.requiredLevel)} required`;
   }
 }
+
+/**
+ * A level or multiplier as the cards print it: every digit while it fits the
+ * card - "Max Level 10025" is a fact, "10K" would be a rounding of one - and
+ * the game's one compact form past that. Neither figure has a maximum, so a
+ * long enough ladder always reaches the point where the digits stop fitting.
+ */
+const figure = (value: number): string =>
+  value < EXACT_BELOW ? String(value) : formatSpeed(value);
+
+/** Five digits is the widest figure the before and after cards hold. */
+const EXACT_BELOW = 100_000;

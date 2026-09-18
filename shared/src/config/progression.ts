@@ -5,9 +5,10 @@ import { rebirthMultiplier } from './rebirth.js';
  * the mount and the two cosmetic ladders are all SERVER-AUTHORITATIVE; the
  * client may predict for UI feel but never decides any of them.
  *
- * There is NO level cap. Levels run on one compounding curve for ever, and a
- * rebirth is unlocked by REACHING a level rather than by being stopped at it.
- * See `config/speed.ts` and `config/rebirth.ts`.
+ * The level cap is NOT a constant here - it is `(rebirths + 1) x 25`, the
+ * level the next rebirth requires, so reaching the cap and unlocking a rebirth
+ * are the same moment. Neither the level nor the rebirth count has an upper
+ * bound. See `config/rebirth.ts`.
  */
 
 /**
