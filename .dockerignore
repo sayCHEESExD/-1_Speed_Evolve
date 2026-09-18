@@ -36,6 +36,14 @@ client/*
 # Player profiles are runtime state and belong on a mounted volume.
 server/data
 
+# Client-only and tooling files the server image never COPYs. `assets/` alone
+# is the FBX, its textures and the music track - megabytes sent to the builder
+# on every deploy for nothing. The Dockerfile copies exactly: the root
+# package.json and package-lock.json, shared/, server/ and client/package.json.
+assets
+scripts
+*.zip
+
 *.log
 .env
 .DS_Store

@@ -110,9 +110,35 @@ There is deliberately **no sprint**. Movement speed comes from level.
 
 ## Deployment
 
-Two hosts, and the split is not negotiable: Netlify cannot run a WebSocket
-server, so the client is deployed there and the Colyseus server runs as a
-long-lived Node process elsewhere (`Dockerfile` included).
+### Bloxity Hosting (automated)
+
+`.github/workflows/deploy.yml` deploys on every push:
+
+| Branch | Channel | Frontend                                 | Backend                                   |
+| ------ | ------- | ---------------------------------------- | ----------------------------------------- |
+| `dev`  | dev     | https://speed-evolve.dev.play.bloxity.io | wss://speed-evolve.dev.host.bloxity.io    |
+| `main` | prod    | https://speed-evolve.play.bloxity.io     | wss://speed-evolve.host.bloxity.io        |
+
+It runs `typecheck`, `verify` and `verify:assets` first, then in parallel:
+
+- **server** - builds the `Dockerfile`, pushes
+  `ghcr.io/<owner>/speed-evolve-server:<channel>-<sha>` to GHCR and rolls it
+  with `POST https://legion.bloxity.io/v1/apps/speed-evolve/deploy`
+  (`seatCap` 15, the room's `maxClients`).
+- **client** - builds with the channel's `VITE_SERVER_URL`, zips `client/dist`
+  with `index.html` at the root and uploads it raw to
+  `POST https://api.bloxity.io/v1/hosting/games/speed-evolve/frontend`.
+
+The commit SHA is the version on both halves. Both routes come from
+https://hosting.bloxity.io/docs. Setup is one repository secret,
+`LEGION_DEPLOY_TOKEN` (My Games on hosting.bloxity.io, behind the eye icon),
+plus making the GHCR package public once after the first push.
+
+### Other hosts
+
+Netlify cannot run a WebSocket server, so there the client is deployed alone
+and the Colyseus server runs as a long-lived Node process elsewhere
+(`Dockerfile` included).
 
 - `VITE_SERVER_URL` is the ONLY client-side server configuration, and it is
   baked in at build time.
