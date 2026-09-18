@@ -46,25 +46,25 @@ export class ShopStalls {
      * behind the counter. The striped market canopy this replaced was a
      * perfectly good market canopy and belonged in a different game.
      *
-     * ORIENTATION is the thing to get right, and it has been wrong twice. The
-     * stalls first stood in a row across the back of the camp facing +Z; the
-     * re-zoning moved them onto the player's LEFT facing -X and these meshes
-     * did not follow, so every hut was built ninety degrees out from the
-     * counter the server thought was there. Then the row moved again, to the
-     * FRONT of the camp on the player's right, facing +X.
+     * ORIENTATION is the thing to get right, and it has been wrong three
+     * times: the row has moved from the back of the camp, to the player's
+     * left, to their right, and now across the front, and more than once the
+     * meshes did not follow the counters.
      *
-     * So nothing below decides which way a hut points. `ACROSS` is its length
-     * along Z, `DEEP` its depth along X, and `FACE` is READ FROM THE LAYOUT -
-     * the same figure the collision box and the prompt radius are placed from.
-     * Moving the row is now one number in `SHOP_ROW` rather than that number
-     * and a second edit in here that somebody has to remember to make.
+     * So each hut is built in its OWN frame - `ACROSS` along local Z, `DEEP`
+     * along local X, the counter facing local +X - and the whole group is then
+     * turned to `SHOP_ROW.faceX/faceZ`, the same vector the collision box and
+     * the prompt are placed from. Moving or turning the row is an edit to the
+     * layout and nothing in here.
      */
     const ACROSS = SHOP_ROW.width;
     const DEEP = SHOP_ROW.depth;
-    /** Which way the counter looks: +1 is toward the camp's open middle. */
-    const FACE = SHOP_ROW.facing;
+    /** Local +X is the front. Kept as a name so the geometry below reads. */
+    const FACE = 1;
     /** The front face, which every player approaches from. */
     const FRONT = (FACE * DEEP) / 2;
+    /** Turns local +X onto the layout's facing vector. */
+    const YAW = Math.atan2(-SHOP_ROW.faceZ, SHOP_ROW.faceX);
 
     const stone = this.material(PALETTE.rockSolid);
     const stoneDark = this.material(PALETTE.boardFrameDark);
@@ -79,6 +79,7 @@ export class ShopStalls {
     for (const shop of SHOPS) {
       const stall = new Group();
       stall.position.set(shop.x, COURSE.floorY, shop.z);
+      stall.rotation.y = YAW;
       const accent = this.material(shop.color);
 
       /* ---- Stone footing ------------------------------------------------ */

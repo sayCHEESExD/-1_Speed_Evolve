@@ -1,18 +1,26 @@
 import {
   MAX_SIM_DELTA,
   SPEED,
+  calculateSpeedGain,
   clampSpeed,
+  describeSpeedGain,
   maxLevelForRebirth,
   resolveLevel,
   resolveMovementProfile,
   speedForNextLevel,
-  speedPerStep,
-  totalMultiplier,
   treadmillBeltSpeed,
   type GainInputs,
   type MovementProfile,
+  type SpeedGainBreakdown,
 } from '@evolve/shared';
+import { serverConfig } from '../config/serverConfig.js';
 import type { PlayerState } from '../rooms/state/PlayerState.js';
+import { logger } from '../util/logger.js';
+
+const SCOPE = 'speed';
+
+/** Float dust forgiven when deciding whether a stride is complete. World units. */
+const STRIDE_EPSILON = 1e-6;
 
 /** What the server remembers between two simulated steps for one player. */
 interface Tracker {
@@ -21,11 +29,26 @@ interface Tracker {
   grounded: boolean;
   /** True until the first step is credited, so spawning pays nothing. */
   fresh: boolean;
+  /**
+   * Distance travelled toward the NEXT step, always under one stride.
+   *
+   * The remainder a tick leaves behind is kept here rather than paid out as a
+   * fraction of a step. That is the whole fix: a tick that covered 7.3 units
+   * pays three whole steps and banks 1.3 toward the fourth, instead of paying
+   * "3.65 steps" - which is how a constant rate came out as +14, +15, +17.
+   */
+  carry: number;
 }
 
 /** Outcome of crediting one movement step. */
 export interface SpeedGain {
-  /** Speed added by this step. */
+  /** Whole steps paid, the jump bonus included. Every one is worth `perStep`. */
+  readonly steps: number;
+  /** Of `steps`, how many were the leave-the-ground bonus. */
+  readonly jumpSteps: number;
+  /** What each step was worth: `calculateSpeedGain(...).gain`. */
+  readonly perStep: number;
+  /** Speed added: exactly `steps x perStep`. */
   readonly gained: number;
   /** Levels crossed, if any. */
   readonly levelsGained: number;
@@ -34,23 +57,26 @@ export interface SpeedGain {
 /**
  * Server authority over Speed farming and levelling.
  *
- * Speed is DERIVED from movement the server actually observes: the distance
- * between consecutive authoritative positions, plus a bonus each time the
- * mount leaves the ground. A client cannot ask for Speed, and a single step is
- * capped at a plausible distance, so a teleport pays nothing.
+ * Speed is DERIVED from movement the server actually observes, and it is paid
+ * in WHOLE STEPS. Travel accumulates toward the next step; every time it
+ * crosses `SPEED.strideDistance` the player is paid one step, and every step
+ * is worth exactly `calculateSpeedGain(...).gain` - the single calculation in
+ * `shared/src/config/speed.ts`. Leaving the ground pays the configured
+ * `jumpBonusSteps` more steps at that same rate. There is no other way Speed
+ * is earned, and no fraction of a step is ever paid.
  *
- * What a step is WORTH is the shared gain formula's business, not this file's.
- * `speedPerStep` multiplies the equipped upgrade pad's base by the rebirth,
- * mount, trail, aura and treadmill factors, and this service calls it rather
- * than assembling its own product. That is the whole defence against the one
- * bug this economy is most exposed to: a bonus that gets multiplied in twice.
+ * A client cannot ask for Speed: the distance is measured between positions
+ * the server simulated itself, a single step is capped at a plausible
+ * distance so a teleport pays nothing, and a movement message the server has
+ * already seen is rejected before it gets here, so nothing is paid twice.
  *
  * Level then follows from the lifetime total, and level alone drives movement
- * speed - which is the loop: ride to farm Speed, gain levels, get faster,
- * clear the gaps that were out of reach.
+ * speed - which is the loop: ride to farm Speed, gain levels, get faster.
  */
 export class SpeedService {
   private readonly trackers = new Map<string, Tracker>();
+  /** The last rate breakdown logged per player, so a change is logged once. */
+  private readonly lastLogged = new Map<string, string>();
 
   initialise(player: PlayerState): void {
     player.maxLevel = this.levelCap(player);
@@ -60,13 +86,15 @@ export class SpeedService {
 
   forget(sessionId: string): void {
     this.trackers.delete(sessionId);
+    this.lastLogged.delete(sessionId);
   }
 
   /**
    * Drop the movement baseline.
    *
    * Called on every respawn: the teleport back to the arena is a huge position
-   * delta that must never be credited as distance travelled.
+   * delta that must never be credited as distance travelled. The part-step in
+   * `carry` goes too - it was travel on a run that has ended.
    */
   reset(sessionId: string, player: PlayerState): void {
     this.trackers.set(sessionId, {
@@ -74,6 +102,7 @@ export class SpeedService {
       z: player.z,
       grounded: true,
       fresh: true,
+      carry: 0,
     });
   }
 
@@ -87,54 +116,47 @@ export class SpeedService {
     const tracker = this.trackers.get(sessionId);
     if (!tracker) {
       this.reset(sessionId, player);
-      return { gained: 0, levelsGained: 0 };
+      return { steps: 0, jumpSteps: 0, perStep: 0, gained: 0, levelsGained: 0 };
     }
 
-    // ONE call, and it already knows about every multiplier the player has.
-    // Nothing is multiplied in below this line.
-    const perStep = speedPerStep(this.gainInputs(player));
+    // THE rate. One call; nothing is multiplied in below this line.
+    const perStep = calculateSpeedGain(this.gainInputs(player)).gain;
 
-    let gained = 0;
+    let strideSteps = 0;
+    let jumpSteps = 0;
 
     if (!tracker.fresh) {
+      let distance = 0;
+
       if (player.treadmill > 0) {
         // Running on a belt. There is no position delta to measure, so the
-        // BELT supplies the distance: the player covers ground at the belt's
-        // own speed without going anywhere, and it flows through the identical
-        // per-step formula. That is why a treadmill needs no progression path
-        // of its own.
-        //
-        // Paid per simulated second of the SERVER's own step, so a client
-        // cannot buy progression by claiming a longer frame - and the belt is
-        // read from `player.treadmill`, which the simulation derived from the
-        // position the server itself computed and the rebirth count the server
-        // owns.
-        //
-        // The rebirth gate is applied TWICE on purpose: once when the
-        // simulation decides which belt is running, and again here on the
-        // distance. Either alone would be correct today; both mean a future
-        // change to one cannot quietly re-open a tier.
+        // BELT supplies the distance, paid per simulated second of the
+        // SERVER's own step - a client cannot buy steps by claiming a longer
+        // frame. The rebirth gate is applied here as well as in the
+        // simulation that chose the belt, so a locked belt supplies nothing.
         const step = Number.isFinite(stepSeconds)
           ? Math.max(0, Math.min(stepSeconds, MAX_SIM_DELTA))
           : 0;
-        const distance = treadmillBeltSpeed(player.treadmill, player.rebirths) * step;
-        gained += (distance / SPEED.strideDistance) * perStep;
+        distance = treadmillBeltSpeed(player.treadmill, player.rebirths) * step;
       } else {
-        const distance = Math.hypot(player.x - tracker.x, player.z - tracker.z);
+        const moved = Math.hypot(player.x - tracker.x, player.z - tracker.z);
+        // Validated against the SAME speed the player actually moves at.
+        // Anything beyond it is a teleport and pays nothing at all.
+        if (moved <= this.maxCreditedStep(player, stepSeconds)) distance = moved;
 
-        // Validation uses the SAME speed the player actually moves at, so a
-        // fast high-level player is never throttled by a cap tuned for a
-        // beginner. Anything beyond it is a teleport and pays nothing at all.
-        if (distance <= this.maxCreditedStep(player, stepSeconds)) {
-          gained += (distance / SPEED.strideDistance) * perStep;
-        }
-
-        // Leaving the ground pays a flat bonus, expressed in steps so it
-        // scales with every multiplier exactly as travel does.
-        if (tracker.grounded && !player.grounded) {
-          gained += SPEED.jumpBonusSteps * perStep;
-        }
+        // Leaving the ground: the configured number of extra steps, at the
+        // same per-step rate as travel, so it scales with every multiplier.
+        if (tracker.grounded && !player.grounded) jumpSteps = SPEED.jumpBonusSteps;
       }
+
+      // Whole steps only. The remainder waits for the next tick.
+      //
+      // STRIDE_EPSILON forgives float dust, nothing more: sixty honest moves
+      // of 0.4 add up to 23.9999999999 rather than 24, and without it the
+      // twelfth stride would sit one ten-billionth short until the next tick.
+      tracker.carry += distance;
+      strideSteps = Math.floor((tracker.carry + STRIDE_EPSILON) / SPEED.strideDistance);
+      tracker.carry = Math.max(0, tracker.carry - strideSteps * SPEED.strideDistance);
     }
 
     tracker.x = player.x;
@@ -142,12 +164,23 @@ export class SpeedService {
     tracker.grounded = player.grounded;
     tracker.fresh = false;
 
+    const steps = strideSteps + jumpSteps;
+    const gained = steps * perStep;
     const beforeLevel = player.level;
-    if (gained > 0) player.totalSpeed = clampSpeed(player.totalSpeed + gained);
+    if (steps > 0) player.totalSpeed = clampSpeed(player.totalSpeed + gained);
 
     this.syncDerived(player);
 
-    return { gained, levelsGained: player.level - beforeLevel };
+    if (steps > 0 && serverConfig.logSpeedAwards) {
+      logger.info(
+        SCOPE,
+        `${player.displayName || sessionId} paid ${steps} step(s)` +
+          (jumpSteps ? ` (${jumpSteps} jump)` : '') +
+          ` x ${perStep} = +${gained} -> total ${player.totalSpeed}`,
+      );
+    }
+
+    return { steps, jumpSteps, perStep, gained, levelsGained: player.level - beforeLevel };
   }
 
   /**
@@ -156,23 +189,28 @@ export class SpeedService {
    * Used on join, on reconnect and whenever anything that feeds the gain
    * formula changes: the profile carries only the Speed earned, and level,
    * movement speed, jump velocity and the two replicated gain figures all
-   * follow from it through the same formulas a live step uses. That is what
-   * lets a tuning change reach returning players rather than only new ones.
+   * follow from it through the same formulas a live step uses.
    */
   syncDerived(player: PlayerState): void {
     player.maxLevel = this.levelCap(player);
     player.level = resolveLevel(player.totalSpeed, player.maxLevel).level;
 
     // Replicated so the HUD prints exactly the figures the server pays, rather
-    // than a client's own reconstruction of them. `treadmill` is part of the
-    // inputs, so both move the moment the mount steps onto a belt.
-    const inputs = this.gainInputs(player);
-    player.totalMultiplier = totalMultiplier(inputs);
-    player.speedPerStep = speedPerStep(inputs);
+    // than a client's own reconstruction of them. Both are fields of the SAME
+    // breakdown, so they cannot disagree with each other or with `credit`.
+    const breakdown = calculateSpeedGain(this.gainInputs(player));
+    player.totalMultiplier = breakdown.multiplier;
+    player.speedPerStep = breakdown.gain;
+    this.logRate(player, breakdown);
 
     const profile = this.movementProfile(player);
     player.moveMultiplier = profile.multiplier;
     player.jumpVelocity = profile.jumpVelocity;
+  }
+
+  /** The full breakdown for a player, for tests and diagnostics. */
+  breakdown(player: PlayerState): SpeedGainBreakdown {
+    return calculateSpeedGain(this.gainInputs(player));
   }
 
   /**
@@ -189,6 +227,19 @@ export class SpeedService {
   /** Speed still needed for the next level, for logging and diagnostics. */
   speedToNextLevel(player: PlayerState): number {
     return speedForNextLevel(player.level);
+  }
+
+  /**
+   * Log the rate whenever it CHANGES: on join, and on every equip, evolution,
+   * rebirth, pad claim or step onto a belt. Once per change rather than per
+   * step, so it is readable - `EVOLVE_LOG_SPEED=1` adds the per-payment line.
+   */
+  private logRate(player: PlayerState, breakdown: SpeedGainBreakdown): void {
+    const b = breakdown;
+    const key = `${b.base}|${b.animal}|${b.training}|${b.items}|${b.trail}|${b.aura}|${b.rebirth}`;
+    if (this.lastLogged.get(player.sessionId) === key) return;
+    this.lastLogged.set(player.sessionId, key);
+    logger.info(SCOPE, `${player.displayName || player.sessionId}: ${describeSpeedGain(b)}`);
   }
 
   /**

@@ -7,6 +7,7 @@ import {
   type RespawnMessage,
   type SetAvatarMessage,
   type SetIdentityMessage,
+  type SpeedAwardedMessage,
   type StageAwardedMessage,
 } from '@evolve/shared';
 import { Client, getStateCallbacks, type Room } from 'colyseus.js';
@@ -73,6 +74,8 @@ export interface NetworkHandlers {
   onPlayerRemoved?(sessionId: string): void;
   onRespawn?(message: RespawnMessage): void;
   onStageAwarded?(message: StageAwardedMessage): void;
+  /** Speed the server has just paid this player. The popups' only source. */
+  onSpeedAwarded?(message: SpeedAwardedMessage): void;
 }
 
 /**
@@ -411,6 +414,10 @@ export class NetworkClient {
 
     room.onMessage<StageAwardedMessage>(MessageType.StageAwarded, (message) => {
       this.handlers.onStageAwarded?.(message);
+    });
+
+    room.onMessage<SpeedAwardedMessage>(MessageType.SpeedAwarded, (message) => {
+      this.handlers.onSpeedAwarded?.(message);
     });
 
     room.onError((code, message) => {

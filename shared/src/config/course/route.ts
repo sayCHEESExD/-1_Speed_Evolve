@@ -1,4 +1,5 @@
-import { COURSE } from './metrics.js';
+import { MOVEMENT, resolveMovementProfile } from '../movement.js';
+import { COURSE, STAGE_TUNING } from './metrics.js';
 import {
   block,
   box,
@@ -97,8 +98,33 @@ export class Route {
   /** Material the next stretch will be made of. */
   kind: SolidKind = 'dirt';
 
+  /**
+   * How far a full-speed jump carries at this stage's recommended level.
+   *
+   * THE unit this course is measured in. A gap written in world units means
+   * something different at every stage - nine units is a real jump at level
+   * one and a stride at level one hundred and sixty - and that is exactly how
+   * the old course ended up a highway: its late gaps were a quarter of a jump.
+   * Written as a fraction of `reach`, a gap is the same ask at every stage,
+   * and the difficulty ladder is the fractions rather than an accident of
+   * the speed curve.
+   */
+  readonly reach: number;
+  /** Run speed at the recommended level. */
+  readonly speed: number;
+  /** How high a jump rises at the recommended level. */
+  readonly jumpHeight: number;
+
   /** What is below, when this stretch lays its kill volume. */
   below: PitRegion['surface'] = 'void';
+  /**
+   * How far below the lowest ground the kill volume's surface sits.
+   *
+   * `COURSE.fallDepth` by default - a real drop. A swamp or a creek sets it
+   * shallow, so the lethal surface is right beside the trail where it can be
+   * SEEN, and stepping off the path is a visible mistake rather than a fall.
+   */
+  fall: number = COURSE.fallDepth;
   /** How fast that water moves, for the renderer. */
   flow = 0;
 
@@ -127,6 +153,12 @@ export class Route {
     this.pitLowY = start.y;
     this.pitStartY = start.y;
     this.seed = stage * 7919 + 13;
+
+    const level = STAGE_TUNING[stage - 1]?.recommendedLevel ?? 1;
+    const profile = resolveMovementProfile(level);
+    this.speed = profile.runSpeed;
+    this.reach = (profile.runSpeed * 2 * profile.jumpVelocity) / MOVEMENT.gravity;
+    this.jumpHeight = (profile.jumpVelocity * profile.jumpVelocity) / (2 * MOVEMENT.gravity);
   }
 
   /** A fresh deterministic number. Never `Math.random`. */
@@ -217,14 +249,15 @@ export class Route {
   walkway(length: number, options: StretchOptions = {}): this {
     const width = options.width ?? this.width;
     const startZ = this.z;
+    const span = this.span(options);
     this.path(length, { ...options, kind: options.kind ?? 'plank' });
 
     const posts = Math.max(2, Math.round(length / 16));
     for (let i = 0; i <= posts; i += 1) {
       const t = i / posts;
       const z = startZ + length * t;
-      const x = this.xAt(z, startZ, length);
-      const y = this.yAt(z, startZ, length);
+      const x = span.x(t);
+      const y = span.y(t);
       for (const edge of [-1, 1]) {
         decorate(this.stage, 'crates', x + (edge * width) / 2, y, z, 0.35, 0, 3);
       }
@@ -385,6 +418,100 @@ export class Route {
   }
 
   /**
+   * A chain of separate landings with a jump between each.
+   *
+   * The precision-jump primitive. Each landing is `land` long and each gap
+   * `gap` wide, so a builder writes them as fractions of `reach` and the chain
+   * asks the same of the player at every stage.
+   *
+   * Sized right, it is what holding W cannot do. When `gap + land` is LESS
+   * than a full jump, a jump from the very edge overshoots the landing - the
+   * player has to take off early, or ease off, and land where they meant to.
+   * When `gap + 2 x land` is MORE than a jump there is always a takeoff that
+   * works: the window is the landing's own length, so it is a skill with a
+   * visible answer rather than a lottery.
+   *
+   * `jog` offsets each landing sideways, so the player has to aim a jump as
+   * well as time it. A NUMBER is the whole side-to-side step between two
+   * neighbouring landings - they sit half of it either side of the line - so
+   * it is exactly the lateral distance a jump has to cover. A LIST gives each
+   * landing's offset from the line, in order. `step` raises (or lowers) every
+   * landing on the last: a climb.
+   *
+   * Keep `aim` and `jog` modest together: the chain drifts toward `aim` AND
+   * alternates, and the two add. A sideways leap bigger than about a third of
+   * a jump is not precision, it is a guess.
+   */
+  hops(
+    count: number,
+    options: {
+      gap: number;
+      land: number;
+      width?: number;
+      jog?: number | readonly number[];
+      step?: number;
+      depth?: number;
+      kind?: SolidKind;
+      aim?: number;
+    },
+  ): this {
+    const width = options.width ?? this.width;
+    const kind = options.kind ?? this.kind;
+    const depth = options.depth ?? 2.6;
+    const fromX = this.x;
+    const toX = options.aim ?? this.x;
+    let z = this.z;
+    let x = this.x;
+    let y = this.y;
+
+    for (let i = 0; i < count; i += 1) {
+      const t = count > 1 ? i / (count - 1) : 1;
+      const base = fromX + (toX - fromX) * t;
+      const jog = options.jog;
+      const offset =
+        jog === undefined
+          ? 0
+          : typeof jog === 'number'
+            ? (i % 2 === 0 ? jog / 2 : -jog / 2)
+            : (jog[i % jog.length] as number);
+      x = base + offset;
+      y += options.step ?? 0;
+      z += options.gap;
+      box(this.stage, kind, x, y, z + options.land / 2, width, options.land, depth);
+      this.noteGround(y);
+      z += options.land;
+    }
+
+    this.x = x;
+    this.y = y;
+    this.aimX = x;
+    this.aimY = y;
+    this.z = z;
+    this.maybeLayPit();
+    return this;
+  }
+
+  /**
+   * A narrow path that weaves side to side.
+   *
+   * `bends` stretches, each curving to the other side of the line by `amp`.
+   * On a path this narrow the weave is the obstacle: holding W runs straight
+   * off the outside of the first bend.
+   */
+  weave(
+    length: number,
+    options: StretchOptions & { amp: number; bends: number; centre?: number },
+  ): this {
+    const centre = options.centre ?? this.x;
+    const each = length / options.bends;
+    for (let i = 0; i < options.bends; i += 1) {
+      const side = i % 2 === 0 ? 1 : -1;
+      this.path(each, { ...options, aim: centre + side * options.amp });
+    }
+    return this;
+  }
+
+  /**
    * A gap: nothing at all, and the cursor moves on.
    *
    * This is where a stage's difficulty actually lives. At the game's base
@@ -450,20 +577,29 @@ export class Route {
     const headroom = options.headroom ?? 13;
     const width = options.width ?? this.width;
     const startZ = this.z;
+    // Captured BEFORE the floor is laid. Laying it moves the cursor to the
+    // tunnel's far end, and walls placed from there instead stand across the
+    // floor of every earlier slab of a tunnel that weaves.
+    const along = this.span(options);
 
     this.path(length, { ...options, kind: options.kind ?? 'cave' });
 
     const steps = Math.max(1, Math.round(length / STEP));
     const span = length / steps;
     for (let i = 0; i < steps; i += 1) {
-      const t = (i + 0.5) / steps;
+      // The same sample the floor slab used, so walls and floor line up.
+      const t = (i + 1) / steps;
       const z = startZ + span * (i + 0.5);
-      const x = this.xAt(z, startZ, length);
-      const y = this.yAt(z, startZ, length);
+      const x = along.x(t);
+      const y = along.y(t);
       // The roof, and the two walls that make it a passage rather than a lid.
-      block(this.stage, 'cave', x - width / 2 - 8, y + headroom, z - span / 2, width + 16, 7, span + 0.4);
-      block(this.stage, 'cave', x - width / 2 - 8, y - 4, z - span / 2, 8, headroom + 4, span + 0.4);
-      block(this.stage, 'cave', x + width / 2, y - 4, z - span / 2, 8, headroom + 4, span + 0.4);
+      // The walls stand a little BACK from the floor's edge, so the floor is a
+      // ledge in a wider cave. Walls built flush with a floor that weaves step
+      // sideways slab by slab, and each step's end face stands in the lane.
+      const inner = width / 2 + 3;
+      block(this.stage, 'cave', x - inner - 8, y + headroom, z - span / 2, inner * 2 + 16, 7, span + 0.4);
+      block(this.stage, 'cave', x - inner - 8, y - 4, z - span / 2, 8, headroom + 4, span + 0.4);
+      block(this.stage, 'cave', x + inner, y - 4, z - span / 2, 8, headroom + 4, span + 0.4);
       if (i % 3 === 0) {
         decorate(this.stage, 'mushroom', x + this.wobble(width * 0.4), y, z, 0.8 + this.next() * 0.6, 0, 0);
       }
@@ -519,10 +655,18 @@ export class Route {
     );
   }
 
-  /** A platform that rises and falls on the spot. */
+  /**
+   * A platform that rises and falls on the spot.
+   *
+   * `size` is its length along the route and, unless `width` says otherwise,
+   * its width too. A late-game lift has to be long - a third of a jump, or the
+   * mount is on it for a tenth of a second - but a lift that wide lets the
+   * rider land anywhere across it and then face a sideways leap to a narrow
+   * ledge, so the two are set separately.
+   */
   lift(
     atZ: number,
-    options: { x?: number; y?: number; size?: number; travel?: number; rate?: number; phase?: number; kind?: SolidKind },
+    options: { x?: number; y?: number; size?: number; width?: number; travel?: number; rate?: number; phase?: number; kind?: SolidKind },
   ): MovingSolid {
     return mover(
       this.stage,
@@ -530,7 +674,7 @@ export class Route {
       options.x ?? this.x,
       options.y ?? this.y,
       atZ,
-      options.size ?? 13,
+      options.width ?? options.size ?? 13,
       options.size ?? 13,
       'lift',
       { amount: options.travel ?? 8, rate: options.rate ?? 0.2, phase: options.phase ?? 0 },
@@ -546,7 +690,7 @@ export class Route {
    */
   collapsing(
     length: number,
-    options: StretchOptions & { sections?: number; rate?: number; hold?: number } = {},
+    options: StretchOptions & { sections?: number; rate?: number; hold?: number; spread?: number } = {},
   ): this {
     const sections = options.sections ?? Math.max(3, Math.round(length / 13));
     const span = length / sections;
@@ -568,8 +712,11 @@ export class Route {
         {
           amount: 26,
           rate: options.rate ?? 0.16,
-          // Stepped, so the give-way runs along the span.
-          phase: i / sections,
+          // Stepped, so the give-way runs along the span. `spread` below one
+          // bunches the whole give-way into that fraction of the cycle,
+          // leaving the rest of it with the span whole: a window to cross in
+          // rather than a bridge that always has a hole somewhere.
+          phase: ((options.spread ?? 1) * i) / sections,
           hold: options.hold ?? 0.78,
         },
       );
@@ -646,6 +793,25 @@ export class Route {
     return this.y + (this.aimY - this.y) * e;
   }
 
+  /**
+   * The eased line a stretch is about to follow, as functions of 0..1.
+   *
+   * Taken BEFORE the stretch is laid, because laying it moves the cursor: a
+   * builder that asks the cursor afterwards where the stretch was is asking
+   * where it ended.
+   */
+  private span(options: StretchOptions): { x: (t: number) => number; y: (t: number) => number } {
+    const fromX = this.x;
+    const fromY = this.y;
+    const toX = options.aim ?? this.aimX;
+    const toY = options.rise ?? this.aimY;
+    const ease = (t: number): number => t * t * (3 - 2 * t);
+    return {
+      x: (t) => fromX + (toX - fromX) * ease(t),
+      y: (t) => fromY + (toY - fromY) * ease(t),
+    };
+  }
+
   /** Where a stretch that started at `fromZ` is, at a world Z inside it. */
   private xAt(z: number, fromZ: number, length: number): number {
     return this.lerpX(Math.min(1, Math.max(0, (z - fromZ) / length)));
@@ -691,7 +857,7 @@ export class Route {
       COURSE.halfWidth + 40,
       this.pitFromZ,
       this.z,
-      this.pitLowY - COURSE.fallDepth,
+      this.pitLowY - this.fall,
       this.flow,
     );
     this.pitFromZ = this.z;

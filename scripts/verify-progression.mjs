@@ -12,6 +12,16 @@
  */
 import {
   AURA_TIERS,
+  auraMultiplier,
+  calculateSpeedGain,
+  describeSpeedGain,
+  formatSpeedGain,
+  mountMultiplier,
+  rebirthMultiplier,
+  trailMultiplier,
+  treadmillBeltSpeed,
+  treadmillMultiplier,
+  upgradePerStep,
   createMotion,
   createMovementInput,
   createSimEvents,
@@ -54,6 +64,7 @@ import { EvolveService } from '../server/dist/progression/EvolveService.js';
 import { RebirthService } from '../server/dist/progression/RebirthService.js';
 import { SpeedService } from '../server/dist/progression/SpeedService.js';
 import { UpgradeService } from '../server/dist/progression/UpgradeService.js';
+import { MovementService } from '../server/dist/movement/MovementService.js';
 import {
   createAuraService,
   createItemService,
@@ -812,19 +823,21 @@ console.log('speed and levels');
   // Credit honest movement: sixty 1/60-second steps at a plausible run.
   // The per-step distance has to be one the server would actually observe -
   // anything larger is a teleport by definition and pays nothing.
-  speeds.reset('test', player);
-  const perStep = 24 / 60;
   let z = 0;
+  player.z = z;
+  speeds.reset('test', player);
+  // The first credit after a reset only establishes the baseline.
+  speeds.credit('test', player, 1 / 60);
+  const perStep = 24 / 60;
   for (let i = 0; i < 60; i += 1) {
     z += perStep;
     player.z = z;
     speeds.credit('test', player, 1 / 60);
   }
   check('honest movement pays', player.totalSpeed > 0, true);
-  // One second at 24 u/s is 24 units, which is 12 steps of 2 units each, each
-  // worth the cockroach's 1.04. The figure is asserted rather than merely
-  // "greater than zero", because a rate that silently halved would pass that.
-  near('  at the rate the formula says', player.totalSpeed, (24 / SPEED.strideDistance) * 1.04, 0.05);
+  // One second at 24 u/s is 24 units: EXACTLY 12 whole steps of 2 units, each
+  // worth exactly the cockroach's 1.04 - asserted as 12 x 1.04, not "about".
+  near('  exactly 12 steps at the rate the formula says', player.totalSpeed, 12 * 1.04, 1e-12);
 
   // A teleport must pay nothing at all.
   const beforeTeleport = player.totalSpeed;
@@ -958,6 +971,160 @@ console.log('speed and levels');
   check('the cockroach is an insect', roach.shape.plan, 'insect');
   check('  six legs', roach.shape.legPairs * 2, 6);
   check('  and is FLAT', roach.shape.bodyH / roach.shape.bodyL < 0.3, true);
+}
+
+console.log('deterministic Speed gain');
+{
+  /*
+   * ONE valid step = ONE gain, and the same setup always pays the same gain.
+   *
+   * Each setup is ridden through the real SpeedService with deliberately
+   * IRREGULAR movement - uneven distances per tick and four different frame
+   * times, the way a real client arrives - and every single payment is checked
+   * against `calculateSpeedGain`. The old service paid a fraction of a step
+   * per tick, so exactly this input came out as a different figure every time.
+   */
+  const ALL = 0xffff;
+  const SETUPS = [
+    { name: 'fresh player', upgradeSlot: 1, mountSlot: 1, trailSlot: 0, auraSlot: 0, rebirths: 0, treadmill: 0 },
+    { name: 'pad 8 (+125), spider', upgradeSlot: 8, mountSlot: 2, trailSlot: 0, auraSlot: 0, rebirths: 0, treadmill: 0 },
+    { name: 'mid game', upgradeSlot: 6, mountSlot: 7, trailSlot: 4, auraSlot: 3, rebirths: 3, treadmill: 0 },
+    { name: 'late game', upgradeSlot: 12, mountSlot: 14, trailSlot: 12, auraSlot: 11, rebirths: 10, treadmill: 0 },
+    { name: 'on the x2 belt', upgradeSlot: 4, mountSlot: 5, trailSlot: 2, auraSlot: 1, rebirths: 5, treadmill: 5 },
+  ];
+  // Travel per tick: uneven, like real frames, and all inside the honest cap.
+  const TRAVEL = [0.37, 0.41, 0.12, 0.46, 0.4, 0.05, 0.49, 0.28, 0.4, 0.31];
+  const FRAMES = [1 / 60, 1 / 30, 1 / 45, 1 / 120];
+
+  for (const setup of SETUPS) {
+    const speeds = new SpeedService();
+    const player = newPlayer(speeds);
+    Object.assign(player, {
+      upgradeSlot: setup.upgradeSlot,
+      mountSlot: setup.mountSlot,
+      trailSlot: setup.trailSlot,
+      ownedTrails: ALL,
+      auraSlot: setup.auraSlot,
+      ownedAuras: ALL,
+      rebirths: setup.rebirths,
+      treadmill: setup.treadmill,
+    });
+    speeds.syncDerived(player);
+    const b = speeds.breakdown(player);
+    console.log(`        ${setup.name}: ${describeSpeedGain(b)}`);
+
+    // The breakdown is the CONFIGURED values, multiplied in the fixed order.
+    const hand =
+      upgradePerStep(setup.upgradeSlot) *
+      mountMultiplier(setup.mountSlot) *
+      treadmillMultiplier(setup.treadmill, setup.rebirths) *
+      1 *
+      trailMultiplier(setup.trailSlot, ALL) *
+      auraMultiplier(setup.auraSlot, ALL) *
+      rebirthMultiplier(setup.rebirths);
+    check(`  ${setup.name}: the gain is the configured values, bit for bit`, b.gain, hand);
+    check('  and the replicated per-step figure is that same number', player.speedPerStep, b.gain);
+    check('  and items never touch Speed', b.items, 1);
+
+    // Ride it.
+    player.z = 0;
+    speeds.reset('test', player);
+    speeds.credit('test', player, 1 / 60);
+    const start = player.totalSpeed;
+    let distance = 0;
+    let steps = 0;
+    let wrong = 0;
+    const rates = new Set();
+    for (let i = 0; i < 400; i += 1) {
+      const dt = FRAMES[i % FRAMES.length];
+      if (setup.treadmill) {
+        distance += treadmillBeltSpeed(setup.treadmill, setup.rebirths) * dt;
+      } else {
+        const d = TRAVEL[i % TRAVEL.length];
+        player.z += d;
+        distance += d;
+      }
+      const g = speeds.credit('test', player, dt);
+      if (g.steps === 0) continue;
+      rates.add(g.perStep);
+      steps += g.steps;
+      if (!Number.isInteger(g.steps) || !Object.is(g.gained, g.steps * b.gain)) wrong += 1;
+    }
+    check('  every payment is whole steps at exactly the rate', wrong, 0);
+    check('  and every one of them paid the same per-step figure', rates.size === 1 && rates.has(b.gain), true);
+    check(
+      '  steps paid = distance / stride, rounded down',
+      steps,
+      Math.floor(distance / SPEED.strideDistance + 1e-6),
+    );
+    near('  the total rose by exactly steps x rate', player.totalSpeed - start, steps * b.gain, 1e-12);
+    check(
+      '  and the level is read off that accumulated total',
+      player.level,
+      resolveLevel(player.totalSpeed, player.maxLevel).level,
+    );
+  }
+
+  // The SAME distance pays the SAME Speed at any frame rate.
+  {
+    const payFor = (ticks) => {
+      const speeds = new SpeedService();
+      const player = newPlayer(speeds);
+      player.upgradeSlot = 8;
+      speeds.syncDerived(player);
+      player.z = 0;
+      speeds.reset('test', player);
+      speeds.credit('test', player, 1 / 60);
+      const before = player.totalSpeed;
+      for (let i = 1; i <= ticks; i += 1) {
+        player.z = (24 * i) / ticks;
+        speeds.credit('test', player, 1 / ticks);
+      }
+      return player.totalSpeed - before;
+    };
+    const at30 = payFor(30);
+    const at60 = payFor(60);
+    const at144 = payFor(144);
+    check('24 units pay the same at 30, 60 and 144 ticks a second', at30 === at60 && at60 === at144, true);
+    near('  which is exactly 12 steps', at60, 12 * 125 * 1.04, 1e-12);
+  }
+
+  // Leaving the ground pays the configured bonus steps, at the same rate.
+  {
+    const speeds = new SpeedService();
+    const player = newPlayer(speeds);
+    player.upgradeSlot = 8;
+    speeds.syncDerived(player);
+    speeds.reset('test', player);
+    speeds.credit('test', player, 1 / 60);
+    player.grounded = false;
+    const jump = speeds.credit('test', player, 1 / 60);
+    check('a jump pays the configured bonus steps', jump.jumpSteps, SPEED.jumpBonusSteps);
+    check('  at exactly the per-step rate', jump.gained, jump.steps * player.speedPerStep);
+    const air = speeds.credit('test', player, 1 / 60);
+    check('  and staying in the air pays it only once', air.jumpSteps, 0);
+  }
+
+  // A movement message the server has already seen is refused before any
+  // Speed could be paid for it.
+  {
+    const movement = new MovementService();
+    const player = new PlayerState();
+    player.sessionId = 'dup';
+    movement.initialise(player);
+    const message = { ...createMovementInput(), seq: 1, dt: 1 / 60, moveZ: 1 };
+    const first = movement.applyInput('dup', player, message, 0);
+    const again = movement.applyInput('dup', player, message, 0);
+    check('a movement message is simulated once', first, true);
+    check('  and a duplicate of it is refused, so it cannot pay twice', again, false);
+  }
+
+  // What a popup prints is the per-step figure, exactly.
+  check('a 1.04 gain prints as 1.04, not 1', formatSpeedGain(1.04), '1.04');
+  check('  125 as 125', formatSpeedGain(125), '125');
+  check('  2.5 as 2.5', formatSpeedGain(2.5), '2.5');
+  check('  1,300 compactly', formatSpeedGain(1300), '1.3K');
+  check('  and float dust never shows', formatSpeedGain(1.04 * 1.5 * 1.25), '1.95');
 }
 
 console.log('');

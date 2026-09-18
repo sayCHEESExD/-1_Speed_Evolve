@@ -22,8 +22,14 @@ let cursorZ: number = COURSE.campEndZ;
 let cursorX = 0;
 let cursorY: number = COURSE.floorY;
 
-/** How wide the path is at the start of a stage, by act. */
-const ENTRY_WIDTH = [26, 20, 18, 15, 14, 13];
+/**
+ * How wide the path is at the start of a stage, by act.
+ *
+ * Narrow from the first act and narrower every act after. These used to run
+ * from twenty-six down to thirteen, which with the forest floor laid either
+ * side made the first half of the course a road.
+ */
+const ENTRY_WIDTH = [11, 9, 8, 7.5, 7, 6.5];
 
 export interface StageBuild {
   /** Called with a cursor at the stage's first metre. */
@@ -56,7 +62,7 @@ export const defineStage = (index: number, build: (route: Route) => void): void 
   // The approach: solid ground, the carved marker, and the act's own material
   // under the player's feet before anything is asked of them.
   route.made(act >= 3 ? 'stone' : 'dirt');
-  route.path(COURSE.stageGap, { width: route.width + 6 });
+  route.path(COURSE.stageGap, { width: route.width + 4 });
   decorate(index, 'marker', route.side(-(route.width / 2 + 6)), route.y, startZ + 14, 1.4, 0, act);
   decorate(index, 'marker', route.side(route.width / 2 + 6), route.y, startZ + 14, 1.4, Math.PI, act);
 
@@ -73,7 +79,7 @@ export const defineStage = (index: number, build: (route: Route) => void): void 
    * route itself travels, so passing through costs nothing and claiming is a
    * deliberate steer.
    */
-  const apron = Math.max(route.width, 22);
+  const apron = Math.max(route.width + 4, 14);
   const spur = apron / 2 + WIN_PAD.width / 2 + 3;
   route.aimAt(route.x).riseTo(route.y);
   route.path(30, { width: apron + WIN_PAD.width + 8, kind: act >= 3 ? 'stone' : 'dirt' });

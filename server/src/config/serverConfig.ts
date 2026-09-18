@@ -17,6 +17,14 @@ export interface ServerConfig {
    * production: without one the endpoint grants Wins to anyone who finds it.
    */
   readonly buxWebhookSecret: string;
+  /**
+   * Log EVERY Speed payment, not just changes to the rate.
+   *
+   * The rate breakdown (`Base -> Animal -> ... -> Final Gain`) is always logged
+   * when it changes. Set `EVOLVE_LOG_SPEED=1` to also log each paid batch,
+   * which is the log to read when checking that every step pays the same.
+   */
+  readonly logSpeedAwards: boolean;
 }
 
 const int = (value: string | undefined, fallback: number): number => {
@@ -48,4 +56,5 @@ export const serverConfig: ServerConfig = {
   // `npm run dev` and `npm start`, so a restart finds the same file either way.
   dataDir: resolve(process.env['EVOLVE_DATA_DIR'] ?? 'data'),
   buxWebhookSecret: process.env['BLOXITY_WEBHOOK_SECRET'] ?? '',
+  logSpeedAwards: process.env['EVOLVE_LOG_SPEED'] === '1',
 };

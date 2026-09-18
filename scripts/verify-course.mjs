@@ -28,6 +28,7 @@ import {
   resolveMovementProfile,
   shopNear,
   SHOPS,
+  SHOP_ROW,
   SPAWN_POSITION,
   SPEED_UPGRADES,
   STAGES,
@@ -565,6 +566,71 @@ console.log('camp geometry');
       pass(`the ${name} stair rides up to the terrace, worst tread ${worst.toFixed(2)}`);
     }
   }
+}
+
+console.log('camp layout');
+{
+  /*
+   * WHERE things stand relative to each other, measured from the solids the
+   * camp actually laid rather than from the constants that placed them.
+   *
+   * The traders have been moved four times, and three of those times they
+   * ended up in somebody else's way - last of all in a column between the
+   * spawn and the treadmills. These are the rules that layout broke.
+   */
+  const camp = COURSE_SOLIDS.filter((solid) => solid.stage === -1);
+  const bounds = (solids) => ({
+    minX: Math.min(...solids.map((s) => s.minX)),
+    maxX: Math.max(...solids.map((s) => s.maxX)),
+    minZ: Math.min(...solids.map((s) => s.minZ)),
+    maxZ: Math.max(...solids.map((s) => s.maxZ)),
+  });
+  const gap = (a, b) =>
+    Math.max(a.minX - b.maxX, b.minX - a.maxX, a.minZ - b.maxZ, b.minZ - a.maxZ);
+  const overlaps = (a, b) =>
+    a.minX < b.maxX && b.minX < a.maxX && a.minZ < b.maxZ && b.minZ < a.maxZ;
+
+  const huts = camp.filter((s) => s.kind === 'shop');
+  const deck = bounds(camp.filter((s) => s.kind === 'training'));
+  // The bank is its plates plus the terrace and the stairs up to it.
+  const bank = bounds(camp.filter((s) => s.kind === 'pad' || s.kind === 'camp'));
+
+  if (huts.length !== SHOPS.length) fail(`expected ${SHOPS.length} trader counters, found ${huts.length}`);
+
+  // 1. Nothing between the open middle and the treadmills. The deck is ridden
+  //    onto from its camp-side face, so that whole strip is its approach.
+  const deckApproach = { minX: deck.maxX, maxX: 0, minZ: deck.minZ, maxZ: deck.maxZ };
+  const blocking = huts.filter((hut) => overlaps(hut, deckApproach));
+  if (blocking.length) fail(`${blocking.length} trader(s) stand between the middle and the treadmills`);
+  else pass('the treadmill deck has a clear approach from the middle');
+
+  // 2. Not in the gateway. The arch's inner faces are the gate's width.
+  const gate = { minX: -15, maxX: 15, minZ: -60, maxZ: 0 };
+  if (huts.some((hut) => overlaps(hut, gate))) fail('a trader stands in the way to the gate');
+  else pass('the way out is clear of traders');
+
+  // 3. Well clear of the upgrade bank, stairs included.
+  const nearestBank = Math.min(...huts.map((hut) => gap(hut, bank)));
+  if (nearestBank < 20) fail(`a trader is only ${nearestBank.toFixed(1)} from the upgrade bank`);
+  else pass(`every trader is ${nearestBank.toFixed(1)}+ units clear of the upgrade bank`);
+
+  // 4. A hut's length of open ground between any two huts.
+  let tightest = Infinity;
+  for (let i = 0; i < huts.length; i += 1) {
+    for (let j = i + 1; j < huts.length; j += 1) tightest = Math.min(tightest, gap(huts[i], huts[j]));
+  }
+  if (tightest < SHOP_ROW.width) fail(`two traders are only ${tightest.toFixed(1)} apart`);
+  else pass(`traders stand ${tightest.toFixed(1)} apart`);
+
+  // 5. At the FRONT, beside the gate - the first thing passed on the way out.
+  const deepest = Math.min(...huts.map((hut) => hut.minZ));
+  if (deepest < -60) fail(`a trader stands ${(-deepest).toFixed(0)} units back from the gate`);
+  else pass('all three traders stand at the front, beside the gate');
+
+  // 6. And the spawn is in open ground, with no prompt reaching it.
+  const spawnSpot = { minX: SPAWN_POSITION.x - 12, maxX: SPAWN_POSITION.x + 12, minZ: SPAWN_POSITION.z - 12, maxZ: SPAWN_POSITION.z + 12 };
+  if ([...huts, deck, bank].some((thing) => overlaps(thing, spawnSpot))) fail('something stands within 12 of the spawn');
+  else pass('the spawn is in open ground');
 }
 
 console.log('');

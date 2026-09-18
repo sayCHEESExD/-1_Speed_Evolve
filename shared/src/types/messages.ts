@@ -80,6 +80,25 @@ export interface StageAwardedMessage {
 }
 
 /**
+ * Server -> client: a batch of Speed the server has already credited.
+ *
+ * Always a WHOLE number of steps at ONE per-step value, so the popup can print
+ * exactly what was paid: `steps` x `perStep`, where `perStep` is
+ * `calculateSpeedGain(...).gain` at the moment of payment. A batch never mixes
+ * two rates - the server sends what it has the instant the rate changes.
+ */
+export interface SpeedAwardedMessage {
+  /** Whole steps paid in this batch, the jump bonus included. */
+  steps: number;
+  /** Of `steps`, how many were the leave-the-ground bonus. */
+  jumpSteps: number;
+  /** What each one of those steps was worth. */
+  perStep: number;
+  /** The authoritative lifetime total once this batch had been added. */
+  total: number;
+}
+
+/**
  * Client -> server: "rebirth me".
  *
  * Deliberately empty. The server knows the level and the rebirth count, and it

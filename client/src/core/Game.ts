@@ -333,6 +333,8 @@ export class Game {
         this.applyPendingRespawn();
       },
       onStageAwarded: (message) => this.onStageAwarded(message),
+      // The ONLY source of the "+N" popups: what the server says it paid.
+      onSpeedAwarded: (message) => this.pops.award(message.steps, message.perStep),
     });
 
     // The room needs to know which Bloxity account this is, or a purchase
@@ -788,9 +790,6 @@ ${identity.pfp}`;
     // separate ladders, and a HUD that assembled its own copy would be a
     // second place for one of them to be applied twice.
     this.hud.update(state.totalSpeed, state.maxLevel, state.totalMultiplier);
-    // Only an INCREASE in the replicated total spawns a popup, so the figure
-    // simply being re-sent on every patch never does.
-    this.pops.observe(state.totalSpeed);
     this.wins.update(state.wins, state.rebirths);
     this.run.setInventory(state.wins, state.upgradeSlot);
 

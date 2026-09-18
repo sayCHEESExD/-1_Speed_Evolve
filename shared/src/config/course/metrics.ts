@@ -62,12 +62,15 @@ export const COURSE: CourseMetrics = {
   /*
    * The expedition camp's footprint.
    *
-   * A HUNDRED AND FIFTY-TWO WIDE and a hundred and seventy-two deep, which is
-   * roughly twice the ground the first version had. That is not generosity for
-   * its own sake: the camp holds four things a player has to be able to tell
-   * apart at a glance - twelve pads in two tiers, six treadmills, three
-   * traders and three leaderboards - and at the old size they were packed
-   * into two thirds of it with the traders standing across the middle.
+   * TWO HUNDRED AND FORTY-EIGHT WIDE and two hundred and twenty-four deep -
+   * about seventy percent more ground than the 184 x 172 it replaced. The camp
+   * holds four things a player has to be able to tell apart at a glance -
+   * twelve pads in two tiers, six treadmills, three traders and three
+   * leaderboards - and at the old size the traders ended up standing in front
+   * of the treadmills because there was nowhere else for them to go.
+   *
+   * It grew SIDEWAYS and BACKWARD, never forward: `campEndZ` is where the
+   * course cursor starts, and moving it would move every stage in the game.
    *
    * It is WIDER than `halfWidth`, which is allowed: `buildCamp` declares the
    * clearing as a wide area, so the corridor clamp and the valley walls both
@@ -76,8 +79,8 @@ export const COURSE: CourseMetrics = {
    * clearing whose furniture reaches its own walls has no perimeter to be
    * lush, and the result is a brown room.
    */
-  campHalfWidth: 92,
-  campStartZ: -172,
+  campHalfWidth: 124,
+  campStartZ: -224,
   campEndZ: 0,
 
   /**

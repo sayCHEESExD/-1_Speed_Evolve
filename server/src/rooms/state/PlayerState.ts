@@ -150,8 +150,11 @@ export class PlayerState extends Schema {
    * what the server paid rather than a figure the client worked out for
    * itself. `float32` is fine for both: they are read, never accumulated.
    */
-  @type('float32') speedPerStep = 1;
-  @type('float32') totalMultiplier = 1;
+  // float64, not float32: these are the figures the HUD prints and the
+  // popups are paid at. A float32 of a late-game product is off in its
+  // seventh digit, which is a HUD disagreeing with the server it mirrors.
+  @type('float64') speedPerStep = 1;
+  @type('float64') totalMultiplier = 1;
 
   /**
    * Authoritative movement multiplier and jump velocity, resolved from LEVEL

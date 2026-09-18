@@ -1,4 +1,4 @@
-import { decorate, hazard, pit, widen } from '../emit.js';
+import { decorate, hazard } from '../emit.js';
 import { defineStage } from '../stage.js';
 import type { Route } from '../route.js';
 import { scatterJungle, streamUnder } from './scenery.js';
@@ -6,202 +6,228 @@ import { scatterJungle, streamUnder } from './scenery.js';
 /**
  * ACT ONE - THE JUNGLE ENTRANCE.
  *
- * Five stages that teach the mount at the width the player can afford to learn
- * at. The trail is wide, the drops are shallow, and every mechanic the rest of
- * the expedition uses is introduced here exactly once: a curve, a hop, a
- * lateral read, a climb, and a hazard - in that order, one per stage.
+ * Five stages that teach the mount, in the order everything later assumes:
+ * steer, hop, read a weave, climb, time a hazard.
  *
- * Nothing in this act is a floating platform over a void. It is a cut trail
- * through real ground with a river beside it, which is the promise the whole
- * course is making about what kind of world this is.
+ * THE TRAIL IS RAISED THROUGH SWAMP. Either side of it is a strip of verge and
+ * then mud, a few units down, which is where a run ends. That is what the old
+ * act lacked: it laid walkable forest floor twenty-nine units out on both
+ * sides, so the "trail" was a paint stripe down the middle of a field and a
+ * player could hold W for five stages without looking at it. The trees now
+ * stand IN the swamp right beside the verge, so the rainforest is what bounds
+ * the path rather than a clamp nobody can see.
+ *
+ * Every size here is a fraction of `r.reach` - how far a jump carries at the
+ * stage's own level - so a gap asks the same of a player at stage one as it
+ * does at stage five. This act keeps every chain FORGIVING: gap plus landing
+ * is at least a whole jump, so a jump from the very edge never overshoots.
+ * Overshooting is taught in act two.
  */
+
+/** A raised trail through a swamp: a shallow, visible, lethal surface. */
+const swamp = (r: Route): void => {
+  r.over('mud');
+  r.fall = 4.5;
+};
+
+/** The verge either side of a trail this wide: three units of undergrowth. */
+const verge = (width: number): number => width / 2 + 3;
 
 /**
  * 1 - RIVERSIDE TRAIL.
  *
- * One long S-curve on a wide dirt trail, with the river running alongside and
- * two shallow fords cut through it. The only thing it asks is that the player
- * steer while moving, which at level one they have to learn before anything
- * else can be asked of them.
+ * Steering, and the first two fords. A trail ten wide that weaves, then a
+ * ford of broad stones with honest little gaps, then a longer weave, then a
+ * second ford whose stones step side to side. At level one this is a walk
+ * that asks the player to look where they are going.
  */
 const riversideTrail = (r: Route): void => {
-  // Over a DROP, not over the river. The river is a feature beside the trail -
-  // laid explicitly by `streamUnder` where it actually crosses - rather than
-  // the default under every metre of it. Setting the route's own `below` to
-  // water floods the entire valley, which reads as a causeway through a lake
-  // instead of a trail through a forest.
-  r.made('dirt').over('void');
-  r.width = 26;
+  swamp(r);
+  const J = r.reach;
+  r.width = 10;
+  r.made('dirt');
 
-  r.path(70, { aim: -16, shoulders: 58 });
+  r.path(46, { aim: -12, shoulders: verge(10) });
+  r.path(40, { aim: 10, shoulders: verge(10) });
   streamUnder(r, 10);
-  r.path(58, { aim: 18, shoulders: 58 });
 
-  // The first ford: a break in the trail with three broad stones across it.
-  // Broad on purpose - at this level it is a walk, and it exists so the SHAPE
-  // of a crossing is familiar long before one is difficult.
-  r.gap(6);
-  r.stones(3, { size: 14, gap: 4, weave: 3 });
-  r.gap(6);
+  // The first ford: three broad stones, gaps a third of a jump.
+  r.hops(3, { gap: J * 0.35, land: J * 0.95, width: 10, jog: 4, kind: 'rock' });
+  r.gap(J * 0.35);
 
-  r.path(74, { aim: -10, shoulders: 58 });
-  r.gap(7);
-  r.stones(3, { size: 13, gap: 5, weave: 4 });
-  r.gap(7);
-  r.path(62, { aim: 6, shoulders: 58 });
+  r.weave(78, { width: 9, amp: 9, bends: 3, shoulders: verge(9) });
 
-  scatterJungle(r, 1, undefined, { density: 1.4, palms: 0.3, inset: 17, reach: 38 });
+  // The second ford: narrower stones that step side to side.
+  r.hops(4, { gap: J * 0.4, land: J * 0.85, width: 8, jog: 6, kind: 'rock' });
+  r.gap(J * 0.4);
+  r.path(40, { width: 10, aim: 0, shoulders: verge(10) });
+
+  scatterJungle(r, 1, undefined, { density: 1.7, palms: 0.3, inset: 9, reach: 34, drop: 12 });
 };
 
 /**
  * 2 - FALLEN TIMBER.
  *
- * The trail narrows and crosses a muddy gully on felled trunks. A log is
- * narrow and it runs straight, so it asks for a line rather than a jump - a
- * different skill from a gap, which is why the two are introduced on different
- * stages rather than together.
+ * Logs across a muddy gully. A log is five wide and it runs straight, so it
+ * asks for a LINE rather than a jump - and the logs do not line up with each
+ * other, so each one is a small aim. Between the runs, a bank of slick mud
+ * that weaves.
  */
 const fallenTimber = (r: Route): void => {
-  r.made('dirt').over('void');
-  r.width = 22;
+  swamp(r);
+  const J = r.reach;
+  r.width = 9;
+  r.made('dirt');
 
-  r.path(52, { aim: 12, shoulders: 54 });
-  r.width = 16;
+  r.path(40, { aim: 8, shoulders: verge(9) });
+  r.logs(3, { run: 18, gap: J * 0.4, width: 6, aim: -6, scatter: 1.6 });
 
-  // The gully the timber crosses: mud, and only where the logs are.
-  const gullyFrom = r.z;
-  r.logs(3, { run: 20, gap: 5, width: 12, aim: -6 });
-  r.path(34, { width: 18, aim: -14, shoulders: 50 });
-  r.logs(4, { run: 17, gap: 6, width: 11, aim: 10 });
-
-  // A bank of mud between the two log runs: slick, so the player feels the
-  // ground change under them for the first time.
   const muddyFrom = r.z;
-  r.path(46, { width: 20, aim: 0, shoulders: 50 });
+  r.gap(J * 0.35);
+  r.weave(56, { width: 8, amp: 7, bends: 2, kind: 'mud', shoulders: verge(8) });
   r.slippery(muddyFrom, r.z, 0.62);
 
-  r.logs(3, { run: 18, gap: 7, width: 11, aim: -8 });
-  pit(2, 'mud', -70, 70, gullyFrom, r.z, r.y - 9);
-  r.path(40, { width: 22, aim: 0, shoulders: 54 });
+  r.logs(4, { run: 15, gap: J * 0.45, width: 5.5, aim: 8, scatter: 2 });
+  r.gap(J * 0.3);
+  r.path(28, { width: 8, aim: -4, shoulders: verge(8) });
+  r.logs(3, { run: 14, gap: J * 0.5, width: 5, aim: -2, scatter: 2.2 });
+  r.gap(J * 0.3);
+  r.path(34, { width: 9, aim: 0, shoulders: verge(9) });
 
-  scatterJungle(r, 2, undefined, { density: 1.5, fallen: 0.5, inset: 16, reach: 34 });
+  scatterJungle(r, 2, undefined, { density: 1.8, fallen: 0.5, inset: 8, reach: 30, drop: 12 });
 };
 
 /**
  * 3 - CREEKSTONES.
  *
- * A wide creek crossed on stones that WEAVE. The gaps are small; what is being
- * asked is that the player look left and right rather than straight ahead,
- * which is the reading skill every later stage assumes they have.
+ * A creek crossed on stones that WEAVE, in three runs, each tighter than the
+ * last. The gaps stay kind; what is being asked is that the player look left
+ * and right before every jump rather than straight ahead - the reading skill
+ * every later stage assumes they have.
  */
 const creekstones = (r: Route): void => {
-  r.made('dirt').over('water', 0.5);
-  r.width = 20;
+  r.over('water', 0.45);
+  r.fall = 3.5;
+  const J = r.reach;
+  r.width = 9;
+  r.made('dirt');
 
-  r.path(44, { aim: -8, shoulders: 52 });
+  r.path(36, { aim: -6, shoulders: verge(9) });
 
-  // The creek. Declared wide so the water reads as a body rather than a ditch,
-  // and the stones weave nearly the full width of it.
-  widen(r.z - 4, r.z + 150, 56);
-  pit(3, 'water', -56, 56, r.z, r.z + 150, r.y - 6, 0.35);
+  r.hops(5, { gap: J * 0.4, land: J * 0.72, width: 8, jog: 7, kind: 'rock', aim: 6 });
+  r.gap(J * 0.35);
+  r.path(18, { width: 9, kind: 'rock' });
+  r.hops(6, { gap: J * 0.45, land: J * 0.68, width: 7, jog: 8, kind: 'rock', aim: -4 });
+  r.gap(J * 0.35);
+  r.path(18, { width: 9, kind: 'rock' });
+  r.hops(4, { gap: J * 0.5, land: J * 0.66, width: 6.5, jog: 9, kind: 'rock' });
+  r.gap(J * 0.4);
 
-  r.stones(5, { size: 13, gap: 6, weave: 9, aim: 14 });
-  r.path(26, { width: 22, kind: 'rock', aim: 10 });
-  r.stones(6, { size: 12, gap: 7, weave: 10, aim: -16 });
-  r.path(24, { width: 20, kind: 'rock', aim: -12 });
-  r.stones(4, { size: 12, gap: 8, weave: 9, aim: 4 });
+  r.path(40, { width: 10, kind: 'dirt', aim: 0, shoulders: verge(10) });
 
-  r.path(48, { width: 24, kind: 'dirt', aim: 0, shoulders: 52 });
-
-  scatterJungle(r, 3, undefined, { density: 1.1, palms: 0.5, inset: 30, reach: 26 });
+  scatterJungle(r, 3, undefined, { density: 1.3, palms: 0.5, inset: 8, reach: 30, drop: 12 });
 };
 
 /**
  * 4 - CANOPY STEPS.
  *
- * The expedition leaves the ground. A staircase of ledges climbs into the
- * canopy, a plank walkway runs through it, and two slow shuttle platforms
- * carry the player across the gaps between trees.
+ * The expedition leaves the ground: a climb up buttress roots, each one a
+ * short hop UP and to the side, then a plank walkway, two crossings on
+ * platforms sliding between trees, and a way back down.
  *
- * The first stage with real height, and therefore the first where a mistake
- * costs a run - which is why the platforms are slow and broad.
+ * The first real height and the first thing that has to be WAITED for. Each
+ * shuttle crossing is too wide to jump without the platform, and the walkway
+ * before it is long enough to stop on.
  */
 const canopySteps = (r: Route): void => {
   r.made('dirt').over('void');
-  r.width = 20;
+  const J = r.reach;
+  const H = r.jumpHeight;
+  r.width = 9;
 
-  r.path(40, { aim: 10, shoulders: 50 });
-  r.stairs(7, 3.4, { run: 7.5, width: 18 });
+  r.path(34, { aim: 8 });
+  r.hops(6, { gap: J * 0.3, land: J * 0.7, step: H * 0.45, width: 8, jog: 6, kind: 'log', depth: 5 });
+  r.gap(J * 0.3);
   r.made('plank');
-  r.walkway(56, { width: 14, aim: -12, rails: true });
+  r.walkway(40, { width: 7, aim: -8, rails: true });
 
-  // Two crossings, each on a platform sliding between two trees. Broad, slow
-  // and out of phase with each other, so a player who misses the first has
-  // somewhere to wait rather than a rhythm to fight.
-  r.gap(30);
-  r.shuttle(r.z - 15, { x: r.x + 6, width: 15, length: 15, travel: 16, rate: 0.13, kind: 'plank' });
-  r.walkway(30, { width: 14, aim: 6 });
-  r.gap(32);
-  r.shuttle(r.z - 16, { x: r.x - 4, width: 15, length: 15, travel: 18, rate: 0.11, phase: 0.5, kind: 'plank' });
-  r.walkway(38, { width: 15, aim: -6, rails: true });
+  // Two crossings on platforms sliding between trees. The span is too wide
+  // to jump without them; slow, and out of phase with each other.
+  for (const [side, phase] of [
+    [1, 0],
+    [-1, 0.5],
+  ] as const) {
+    const from = r.z;
+    const reachOut = J * 0.42;
+    const platform = J * 0.45;
+    r.gap(reachOut * 2 + platform);
+    r.shuttle(from + reachOut + platform / 2, {
+      x: r.x,
+      width: 9,
+      length: platform,
+      travel: 13,
+      rate: 0.14,
+      phase,
+      kind: 'plank',
+    });
+    decorate(4, 'tree', r.x + side * 18, r.y - 40, from + reachOut, 2.6, 0, 1);
+    r.walkway(32, { width: 7, aim: r.x - side * 6, rails: true });
+  }
 
-  r.stairs(6, -3.2, { run: 8, width: 18, kind: 'dirt' });
+  r.stairs(6, -3.2, { run: 8, width: 9, kind: 'dirt' });
   r.made('dirt');
-  r.path(36, { width: 22, aim: 0 });
+  r.path(34, { width: 10, aim: 0 });
 
-  scatterJungle(r, 4, undefined, { density: 1.6, canopy: true, inset: 20, reach: 30 });
+  scatterJungle(r, 4, undefined, { density: 1.8, canopy: true, inset: 9, reach: 30 });
 };
 
 /**
  * 5 - OVERGROWN GATE.
  *
- * The first ruin, and the first thing in the world that can kill on its own.
- * A stone causeway, a broken span with one real gap, and a small court where
- * two ancient arms sweep slowly across the floor.
+ * The first ruin and the first thing that kills on its own. A broken span, a
+ * run of fallen pillar-tops, and a narrow court where two stone arms sweep
+ * the whole floor.
  *
- * Slowly is the whole design. A hazard the player meets at level fifteen has
- * to be legible before it is dangerous, or the lesson it teaches is that the
- * game is unfair rather than that hazards have timing.
+ * The court is sixteen units wide rather than sixty-eight. In the old one the
+ * arm swept a plaza a player could simply ride round the edge of; here there
+ * is no edge to ride round, so the arm is a timing and not a detour. ONE arm,
+ * and slow: watch it pass, then go. Two arms opposite each other make a bar
+ * through the middle that is never clear for long enough to cross.
  */
 const overgrownGate = (r: Route): void => {
   r.made('stone').over('void');
-  r.width = 18;
+  const J = r.reach;
+  r.width = 8;
 
-  r.path(50, { aim: -10, shoulders: 46 });
+  r.path(40, { aim: -8 });
+  r.path(24, { width: 7, kind: 'ruin' });
+  r.gap(J * 0.55, { aim: -3 });
+  r.path(24, { width: 7, kind: 'ruin', aim: 3 });
 
-  // The broken span: two stubs and one honest gap between them.
-  r.path(30, { width: 14, kind: 'ruin' });
-  r.gap(13, { aim: -4 });
-  r.path(34, { width: 14, kind: 'ruin', aim: 4 });
+  r.hops(3, { gap: J * 0.4, land: J * 0.66, width: 7, jog: 7, kind: 'ruin', depth: 8 });
+  r.gap(J * 0.35);
+  r.path(18, { width: 8, kind: 'stone' });
 
-  // The court. Two arms turning about a hub at the centre, at different radii
-  // so the safe line changes as the player crosses rather than being a single
-  // gap to walk through.
-  const courtZ = r.z + 40;
-  r.plaza(80, { halfWidth: 34, kind: 'ruin', aim: 0 });
-  for (const [radius, rate, phase] of [
-    [17, 0.42, 0],
-    [27, -0.3, 0.35],
-  ] as const) {
-    for (let i = 0; i < 3; i += 1) {
-      hazard(5, 'spinner', {
-        x: 0,
-        y: r.y + 2.4,
-        z: courtZ,
-        radius: 3.1,
-        sweep: radius - i * 4.6,
-        rate,
-        phase,
-      });
-    }
+  const courtZ = r.z + 34;
+  r.plaza(68, { halfWidth: 8, kind: 'ruin', aim: r.x });
+  for (let i = 0; i < 3; i += 1) {
+    hazard(5, 'spinner', {
+      x: r.x,
+      y: r.y + 2.4,
+      z: courtZ,
+      radius: 2.4,
+      sweep: 14.5 - i * 4.2,
+      rate: 0.5,
+      phase: 0,
+    });
   }
-  decorate(5, 'statue', -26, r.y, courtZ - 22, 1.8, 0.4, 0);
-  decorate(5, 'statue', 26, r.y, courtZ - 22, 1.8, -0.4, 0);
-  decorate(5, 'arch', 0, r.y, courtZ + 34, 2.2, 0, 0);
+  decorate(5, 'statue', r.x - 16, r.y, courtZ - 26, 1.8, 0.4, 0);
+  decorate(5, 'statue', r.x + 16, r.y, courtZ - 26, 1.8, -0.4, 0);
+  decorate(5, 'arch', r.x, r.y, courtZ + 30, 2.2, 0, 0);
 
-  r.path(44, { width: 20, kind: 'stone', aim: 0 });
+  r.path(40, { width: 9, kind: 'stone', aim: 0 });
 
-  scatterJungle(r, 5, undefined, { density: 1.3, ruins: 0.6, inset: 22, reach: 28 });
+  scatterJungle(r, 5, undefined, { density: 1.6, ruins: 0.6, inset: 10, reach: 30 });
 };
 
 export const buildAct1 = (): void => {

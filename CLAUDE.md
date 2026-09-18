@@ -88,6 +88,31 @@ on purpose. `verify:progression` asserts both halves of this.
 
 - **Speed** is the currency. Players farm it by riding: distance the SERVER
   observes, plus a bonus each time the mount leaves the ground.
+- **Speed is paid in WHOLE STEPS at ONE rate.** `calculateSpeedGain` in
+  `shared/src/config/speed.ts` is the only calculation of what a step is
+  worth: `Base (pad) x Animal x Training (belt) x Items x Trail x Aura x
+  Rebirth`, multiplied in that fixed order so the same setup gives the same
+  float64 to the last bit. Items is always 1 there - the item ladder multiplies
+  stage Wins, not Speed - and is listed so nobody "fixes" it by multiplying an
+  item in. `totalMultiplier` and `speedPerStep` are views onto it, not
+  formulas.
+- `SpeedService` banks distance in a per-player `carry` and pays one step for
+  every `strideDistance` crossed; the remainder waits for the next tick. It
+  used to pay `distance / stride x rate` per tick - a FRACTION of a step, sized
+  by how far the mount happened to move between two messages - which turned
+  one constant rate into "+14, +15, +17, +8". A jump pays `jumpBonusSteps`
+  more steps at the same rate. Every payment is therefore `steps x rate`, and
+  `verify:progression` rides five setups through irregular frames and checks
+  every single payment against the breakdown.
+- **The popups print what the server PAID** (`MessageType.SpeedAwarded`: a
+  step count and the per-step value, batched once per tick and never mixing two
+  rates). They used to diff the replicated total between patches and release
+  whatever had piled up on a timer, which is the other half of how a constant
+  rate came out random. A popup shows the per-step figure and a count -
+  "+125", "+125 x3" - never a sum, and never at a random size.
+- The server logs the breakdown (`Base -> Animal -> ... -> Final Gain`)
+  whenever a player's rate changes; `EVOLVE_LOG_SPEED=1` also logs every
+  payment.
 - The level curve **COMPOUNDS**, and it has two halves. Up to `levelKnee` (9)
   a level costs `levelStep × L` - a flat 5, 10, 15 - and past it that same
   linear figure is multiplied by `levelGrowth` (1.06) once per level beyond
@@ -456,40 +481,48 @@ territories are DERIVED from the arenas those stages actually laid.
 
 ### The camp
 
-FOUR ZONES round a large empty middle, and the emptiness is the design. A
-hundred and eighty-four wide by a hundred and seventy-two deep, which is about
-twice the ground the first version had:
+FOUR ZONES round a large empty middle, and the emptiness is the design. Two
+hundred and forty-eight wide by two hundred and twenty-four deep - about
+seventy percent more ground than the 184 x 172 before it. Top-down with the
+back wall at the top, so +X is on the drawing's RIGHT - which is the player's
+LEFT, because they face down the drawing toward the gate:
 
 ```
-   z -172  ┌─────── the ancient wall: three LEADERBOARDS ───────┐
-           │                                                    │
-           │  treadmills        open green                      │
-           │  ┌─────────┐                       ┌──────────┐    │
-           │  │ 6 belts │          SPAWN        │ 12 PADS  │    │
-           │  │ on a    │         (0, -88)      │ two tiers│    │
-           │  │ deck    │                       │          │    │
-           │  └─────────┘                       └──────────┘    │
-           │   TRADERS ┌───┐ ┌───┐ ┌───┐                        │
-   z    0  └──────────── the cut trail, and stage 1 ────────────┘
+   z -224  ┌──────────── the ancient wall: three LEADERBOARDS ────────────┐
+           │                                                              │
+           │                                               ┌──────────┐   │
+           │   treadmills                                  │ 12 PADS  │   │
+           │   ┌─────────┐           open green            │ two tiers│   │
+           │   │ 6 belts │                                 │ on a     │   │
+           │   │ on a    │             SPAWN               │ terrace  │   │
+           │   │ deck    │           (0, -108)             └──────────┘   │
+           │   └─────────┘                                                │
+           │                         ┌──gate──┐   ▣ TRADERS ▣   ▣       │
+   z    0  └───────────────────── the cut trail, and stage 1 ─────────────┘
 ```
+
+- **It grew sideways and backward, never forward.** `campEndZ` (0) is where the
+  course cursor starts; moving it would move all thirty stages.
 
 - The functional LAYOUT is inherited: pads down the player's left (+X),
   treadmills down their right (-X), leaderboards at the back, one spawn in the
   middle. Those are things a returning player's hands already know.
-- **The traders stand across the FRONT**, between the spawn and the gate, on
-  the player's right and facing back into the open middle. Every route out of
-  the camp passes all three. They have been in two wrong places already: across
-  the middle of the clearing in front of the leaderboards, in the way of
-  everybody crossing it; and then in the far back corner of the pad side,
-  behind the whole length of the upgrade bank, which made them the last thing
-  in the camp anybody reached. They are TWENTY-FOUR apart rather than sixteen,
-  because three huts thirteen long at sixteen spacing is three units of gap.
-- **A hut is not built facing a direction; it READS one.** `SHOP_ROW.facing` is
-  the single fact, and the collision box, the prompt radius and every mesh in
-  `ShopStalls` are placed from it. The row has moved twice and each time the
-  meshes did not follow - once ninety degrees out from their own counters, once
-  with all three keepers staring into the forest. Moving the row is now one
-  number.
+- **The traders stand in a row ACROSS THE FRONT, beside the gate** -
+  `[ TRADERS ] [ GATE ]` as the player sees it - facing back into the camp,
+  twenty-six apart for a thirteen-long hut. Every run leaves through here, so
+  every player passes all three. They have stood in three wrong places: across the middle in front of
+  the leaderboards; in the far back corner behind the upgrade bank, where
+  nobody reached them; and in a column just inboard of the treadmill deck,
+  which put three huts between the spawn and the machines. The front is the
+  one strip neither side zone uses, which is why the upgrade bank now stops
+  thirty units short of it.
+- **A hut is built in its own frame and TURNED.** `SHOP_ROW.faceX/faceZ` is the
+  single fact about orientation: the collision footprint (`SHOP_SIZE_X/Z`), the
+  prompt and the rotation of every mesh in `ShopStalls` all come from it. The
+  meshes failed to follow the counters twice before this.
+- **The treadmills own their whole camp-side face.** The deck is ridden onto
+  from the middle, so `isReserved` keeps the entire strip between the deck and
+  the open middle clear, not just a margin round the deck.
 - **The upgrade rows are SEVEN UNITS apart**, on a terrace with a retaining
   wall and a stair at either end. The stairs stand BEYOND the outermost plate
   at each end - `UPGRADE_STAIR_Z`, not an offset recomputed wherever it is
@@ -505,7 +538,7 @@ twice the ground the first version had:
 - Every tread is 0.7 against a 0.9 step height, so the terrace is ridden up
   rather than jumped onto. `verify:course` walks both stairs the way the
   simulation does and fails on a tread over the step height.
-- The MIDDLE stays empty: the player spawns at z -88 and the chase camera sits
+- The MIDDLE stays empty: the player spawns at z -108 and the chase camera sits
   fifteen units behind them. `isReserved` keeps every prop out of the middle,
   out of the four zones and out of their approach lanes.
 - **LUSH PERIMETER, CLEAN MIDDLE.** The clearing is deliberately wider than its
@@ -792,7 +825,11 @@ Do not claim something works without running it.
   - no hazard reaching through a valley wall;
   - and the CAMP's own geometry: no shared faces, nothing interpenetrating
     above ground, two upgrade tiers far enough apart to read as two, every pad
-    claimable from its own tier and no other, and both terrace stairs ridable.
+    claimable from its own tier and no other, and both terrace stairs ridable;
+  - and the camp's LAYOUT, measured from the laid solids: nothing between the
+    open middle and the treadmill deck, no trader in the gateway, every trader
+    twenty units clear of the upgrade bank and a hut's length from the next,
+    all three at the front, and the spawn in open ground.
   `verify:progression` exercises the server's reward, evolution, upgrade and
   purchase authority INCLUDING the rejection paths.
 - `npm run size:client` must report under 12 MB.

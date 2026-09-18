@@ -229,34 +229,131 @@ export interface GainInputs {
 }
 
 /**
- * The product of every MULTIPLIER a player has earned, with no base.
+ * What ONE step is worth, and every factor that made it so.
  *
- * This is the figure the HUD prints as "Total Multiplier: x2.20". It is
- * separated from the per-step value so the two cannot drift: the HUD shows
- * exactly the number the gain formula multiplies by, because it is the same
- * call.
- *
- * Every factor appears here EXACTLY ONCE. That is the whole reason this
- * function exists rather than four call sites each multiplying in what they
- * happen to know about - a bonus applied twice is invisible in code review and
- * obvious in the economy a week later.
+ * Returned whole rather than as a bare number so the figure a player is paid
+ * can always be explained: the server logs it, `verify:progression` asserts on
+ * it, and the HUD's "Total Multiplier" is its `multiplier` field. There is no
+ * second place that knows how these combine.
  */
-export const totalMultiplier = (inputs: GainInputs): number =>
-  rebirthMultiplier(inputs.rebirths) *
-  mountMultiplier(inputs.mountSlot) *
-  trailMultiplier(inputs.trailSlot, inputs.ownedTrails) *
-  auraMultiplier(inputs.auraSlot, inputs.ownedAuras) *
-  treadmillMultiplier(inputs.treadmill, inputs.rebirths);
+export interface SpeedGainBreakdown {
+  /** The equipped Speed Upgrade pad's per-step value. The only BASE. */
+  readonly base: number;
+  /** The mount's multiplier - what evolving buys. */
+  readonly animal: number;
+  /** The Speed Training belt underfoot, or 1 off a belt or on a locked one. */
+  readonly training: number;
+  /**
+   * Always 1 for SPEED, and deliberately listed anyway.
+   *
+   * The item ladder multiplies the WINS a stage pays (`StageService`), not
+   * Speed - that is what stops the third shop being the first two at a worse
+   * price. It sits in the breakdown at 1 so a log line reads the whole
+   * formula, and so nobody "fixes" its absence by multiplying an item in.
+   */
+  readonly items: number;
+  /** The equipped trail's multiplier, 1 if none or unowned. */
+  readonly trail: number;
+  /** The equipped aura's multiplier, 1 if none or unowned. */
+  readonly aura: number;
+  /** The rebirth ladder's multiplier. */
+  readonly rebirth: number;
+  /** animal x training x items x trail x aura x rebirth: the HUD's figure. */
+  readonly multiplier: number;
+  /** base x every factor above, in that order: Speed per step. */
+  readonly gain: number;
+}
 
 /**
- * Speed granted for ONE step.
+ * THE Speed calculation. Nothing else in the game decides what a step is worth.
  *
- * THE single gain evaluator. The base comes from the upgrade pad and every
- * other term is a factor through `totalMultiplier`, so a new bonus is a factor
- * added there and never a second formula anywhere.
+ *   gain = base x animal x training x items x trail x aura x rebirth
+ *
+ * Multiplied in ONE FIXED ORDER, so the same inputs produce the same float64
+ * down to the last bit on the server, in a test and in a log - floating-point
+ * multiplication is not associative, and two call sites multiplying the same
+ * six numbers in different orders can disagree in the last digit. Every
+ * factor comes from its own config table and appears exactly once.
+ *
+ * It is a PER-STEP figure and deliberately knows nothing about distance or
+ * time. How many steps a player took is the server's business
+ * (`SpeedService`), and it always pays a WHOLE number of them - so every step
+ * a player is credited is worth exactly this, and nothing in between.
  */
-export const speedPerStep = (inputs: GainInputs): number =>
-  upgradePerStep(inputs.upgradeSlot) * totalMultiplier(inputs);
+export const calculateSpeedGain = (inputs: GainInputs): SpeedGainBreakdown => {
+  const base = upgradePerStep(inputs.upgradeSlot);
+  const animal = mountMultiplier(inputs.mountSlot);
+  const training = treadmillMultiplier(inputs.treadmill, inputs.rebirths);
+  const items = 1;
+  const trail = trailMultiplier(inputs.trailSlot, inputs.ownedTrails);
+  const aura = auraMultiplier(inputs.auraSlot, inputs.ownedAuras);
+  const rebirth = rebirthMultiplier(inputs.rebirths);
+
+  const multiplier = animal * training * items * trail * aura * rebirth;
+  const gain = base * animal * training * items * trail * aura * rebirth;
+  return { base, animal, training, items, trail, aura, rebirth, multiplier, gain };
+};
+
+/**
+ * The product of every MULTIPLIER a player has earned, with no base.
+ *
+ * The HUD's "Total Multiplier: x2.20". A view onto `calculateSpeedGain`, not a
+ * second formula - which is the whole reason it cannot drift from what a step
+ * actually pays.
+ */
+export const totalMultiplier = (inputs: GainInputs): number =>
+  calculateSpeedGain(inputs).multiplier;
+
+/** Speed granted for ONE step. A view onto `calculateSpeedGain`. */
+export const speedPerStep = (inputs: GainInputs): number => calculateSpeedGain(inputs).gain;
+
+/**
+ * One line a person can check by hand:
+ *
+ *   Base 8 -> Animal x1.04 = 8.32 -> Training x1 = 8.32 -> ... -> Final Gain 8.32
+ *
+ * Figures are printed EXACTLY (to four decimals, with thousands separators).
+ *
+ * Each arrow carries the running product, so a wrong factor is visible at the
+ * exact stage it went wrong rather than only in the total.
+ */
+export const describeSpeedGain = (b: SpeedGainBreakdown): string => {
+  // EXACT, not compact: this is the line somebody checks with a calculator,
+  // and "3.5K" hides the digits they are checking.
+  const n = (value: number): string =>
+    value.toLocaleString('en-US', { maximumFractionDigits: 4 });
+  let running = b.base;
+  const parts = [`Base ${n(b.base)}`];
+  const stages: readonly (readonly [string, number])[] = [
+    ['Animal', b.animal],
+    ['Training', b.training],
+    ['Items', b.items],
+    ['Trail', b.trail],
+    ['Aura', b.aura],
+    ['Rebirth', b.rebirth],
+  ];
+  for (const [name, factor] of stages) {
+    running *= factor;
+    parts.push(`${name} x${n(factor)} = ${n(running)}`);
+  }
+  parts.push(`Final Gain ${n(b.gain)}`);
+  return parts.join(' -> ');
+};
+
+/**
+ * How a per-step GAIN is printed: exact below a thousand, compact above.
+ *
+ * Two decimal places at most, trailing zeros dropped - "+1.04", "+2.5",
+ * "+125". NOT `formatSpeed`, which floors anything under a thousand to a whole
+ * number: a mount paying 1.04 a step would have shown "+1" while the total
+ * rose by 1.04, which is precisely the displayed-versus-paid disagreement a
+ * deterministic gain is supposed to end.
+ */
+export const formatSpeedGain = (value: number): string => {
+  const amount = Number.isFinite(value) ? Math.max(0, value) : 0;
+  if (amount >= COMPACT_ABOVE) return formatSpeed(amount);
+  return String(Number(amount.toFixed(2)));
+};
 
 /**
  * The compact ladder, largest first.

@@ -1,4 +1,4 @@
-import { block, decorate, groundDuringBuild, hazard, pit } from '../emit.js';
+import { block, decorate, groundDuringBuild, hazard, movers, pit, solids } from '../emit.js';
 import type { Route } from '../route.js';
 import type { DecorationKind } from '../types.js';
 
@@ -168,23 +168,75 @@ export const streamUnder = (r: Route, width: number): void => {
 };
 
 /**
+ * Where a stage's route actually IS over a slice of Z: its left and right
+ * edges and its highest walkable top, read from the ground already laid.
+ *
+ * Scenery placed from the cursor's position is placed from where the route
+ * ENDED, and on a route that weaves, climbs a stair or drops down a cataract
+ * that is somewhere else entirely - pillars in the path, torches in mid-air, a
+ * cliff face through a landing. Everything that has to stand BESIDE the route
+ * asks this instead. Returns null over a slice with no ground at all.
+ */
+export const routeAt = (
+  stage: number,
+  z0: number,
+  z1: number,
+): { left: number; right: number; top: number } | null => {
+  let left = Infinity;
+  let right = -Infinity;
+  let top = -Infinity;
+  const consider = (minX: number, maxX: number, minZ: number, maxZ: number, maxY: number): void => {
+    if (maxZ < z0 - 4 || minZ > z1 + 4) return;
+    if (minX < left) left = minX;
+    if (maxX > right) right = maxX;
+    if (maxY > top) top = maxY;
+  };
+  for (const solid of solids) {
+    if (solid.stage !== stage || solid.maxY - solid.minY > 30) continue;
+    if (solid.kind === 'ruin' && solid.maxX - solid.minX < 9 && solid.maxY - solid.minY > 8) continue;
+    consider(solid.minX, solid.maxX, solid.minZ, solid.maxZ, solid.maxY);
+  }
+  for (const mover of movers) {
+    if (mover.stage !== stage) continue;
+    const sway = mover.motion === 'shuttle' && mover.axis === 'x' ? mover.amount : 0;
+    consider(mover.minX - sway, mover.maxX + sway, mover.minZ, mover.maxZ, mover.maxY);
+  }
+  return left === Infinity ? null : { left, right, top };
+};
+
+/**
  * A cliff face rising beside the route, with the route running along its foot.
  *
  * The shoulder a ledge stage hugs. It is a real solid: a mount pressed against
  * the wall stops, which is what makes a narrow ledge feel like a ledge rather
  * than a strip of floor with nothing on either side.
+ *
+ * Every segment is placed from the ground ALREADY LAID at its own Z - how far
+ * out the route reaches there, and how high it stands - rather than from where
+ * the cursor has ended up. The old version put the whole face at the route's
+ * final X and height, which on a route that shifts sideways or descends put a
+ * hundred-unit wall straight through the landings it was meant to stand
+ * beside.
  */
 export const cliffWall = (r: Route, length: number, side: 1 | -1, height = 64): void => {
   const fromZ = r.z - length;
   const steps = Math.max(1, Math.round(length / 14));
+  const span = length / steps;
+  let edge = r.x + side * (r.width / 2);
+  let top = r.y;
   for (let i = 0; i < steps; i += 1) {
-    const t = (i + 0.5) / steps;
-    const z = fromZ + length * t;
-    const x = r.x + side * (r.width / 2 + 5);
-    block(r.stage, 'rock', side > 0 ? x : x - 26, r.y - 24, z - length / steps / 2, 26, height, length / steps + 0.4);
+    const z0 = fromZ + span * i;
+    const here = routeAt(r.stage, z0, z0 + span);
+    if (here) {
+      edge = side > 0 ? here.right : here.left;
+      top = here.top;
+    }
+    const x = edge + side * 4;
+    const z = z0 + span / 2;
+    block(r.stage, 'rock', side > 0 ? x : x - 26, top - 24, z0, 26, height, span + 0.4);
     if (i % 2 === 0) {
-      decorate(r.stage, 'vine', x + side * 2, r.y + 14 + r.next() * 18, z, 1 + r.next(), 0, i % 3);
-      decorate(r.stage, 'fern', x + side * 1.5, r.y, z, 0.8, 0, 0);
+      decorate(r.stage, 'vine', x + side * 2, top + 14 + r.next() * 18, z, 1 + r.next(), 0, i % 3);
+      decorate(r.stage, 'fern', x + side * 1.5, top, z, 0.8, 0, 0);
     }
   }
 };
@@ -241,19 +293,27 @@ export const colonnade = (
   const fromZ = r.z - length;
   const count = Math.max(1, Math.round(length / spacing));
 
+  // `offset` is measured from the route's centre line where it IS, and never
+  // lets a pillar closer than three units to the route's own edge there.
+  const margin = offset - r.width / 2;
+  let here = { left: r.x - r.width / 2, right: r.x + r.width / 2, top: r.y };
   for (let i = 0; i <= count; i += 1) {
     const z = fromZ + (length * i) / count;
+    here = routeAt(r.stage, z - spacing / 2, z + spacing / 2) ?? here;
+    const centre = (here.left + here.right) / 2;
     for (const side of [-1, 1]) {
       // A quarter of them are snapped off halfway up. An unbroken colonnade
       // reads as a building; a broken one reads as a ruin, and this
       // civilisation has been gone a very long time.
       const shear = r.next() < broken ? 0.35 + r.next() * 0.4 : 1;
-      block(r.stage, 'ruin', r.x + side * offset - 2.6, r.y, z - 2.6, 5.2, height * shear, 5.2);
+      const edge = side > 0 ? here.right : here.left;
+      const x = side > 0 ? Math.max(centre + offset, edge + Math.max(3, margin) + 2.6) : Math.min(centre - offset, edge - Math.max(3, margin) - 2.6);
+      block(r.stage, 'ruin', x - 2.6, here.top, z - 2.6, 5.2, height * shear, 5.2);
       if (shear > 0.95) {
-        block(r.stage, 'ruin', r.x + side * offset - 4, r.y + height, z - 4, 8, 3.4, 8);
+        block(r.stage, 'ruin', x - 4, here.top + height, z - 4, 8, 3.4, 8);
       }
       if (i % 3 === 0) {
-        decorate(r.stage, 'vine', r.x + side * offset, r.y + height * shear, z, 1.1, 0, i % 3);
+        decorate(r.stage, 'vine', x, here.top + height * shear, z, 1.1, 0, i % 3);
       }
     }
   }
@@ -262,8 +322,11 @@ export const colonnade = (
 /** A pair of guardian statues flanking the route, facing inward. */
 export const guardians = (r: Route, z: number, scale = 2.2, offset = 0): void => {
   const out = offset || r.width / 2 + 11;
+  const here = routeAt(r.stage, z - 6, z + 6);
+  const centre = here ? (here.left + here.right) / 2 : r.x;
+  const y = here ? here.top : r.y;
   for (const side of [-1, 1]) {
-    decorate(r.stage, 'statue', r.x + side * out, r.y, z, scale, side > 0 ? -Math.PI / 2 : Math.PI / 2, 0);
+    decorate(r.stage, 'statue', centre + side * out, y, z, scale, side > 0 ? -Math.PI / 2 : Math.PI / 2, 0);
   }
 };
 
@@ -273,9 +336,10 @@ export const torchlight = (r: Route, length: number, spacing = 22): void => {
   const count = Math.max(1, Math.round(length / spacing));
   for (let i = 0; i <= count; i += 1) {
     const z = fromZ + (length * i) / count;
-    for (const side of [-1, 1]) {
-      decorate(r.stage, 'torch', r.x + side * (r.width / 2 + 3.2), r.y, z, 1.1, 0, 0);
-    }
+    const here = routeAt(r.stage, z - 3, z + 3);
+    if (!here) continue;
+    decorate(r.stage, 'torch', here.left - 3.2, here.top, z, 1.1, 0, 0);
+    decorate(r.stage, 'torch', here.right + 3.2, here.top, z, 1.1, 0, 0);
   }
 };
 

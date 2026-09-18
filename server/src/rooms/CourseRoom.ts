@@ -19,6 +19,7 @@ import {
   type PlayerMotion,
   type RespawnMessage,
   type RespawnReason,
+  type SpeedAwardedMessage,
   type StageAwardedMessage,
   sanitizeAppearance,
   sanitizeProportions,
@@ -109,6 +110,20 @@ export class CourseRoom extends Room<CourseState> {
 
   /** Browser-stored player id per session, for persistence. */
   private readonly playerIds = new Map<string, string>();
+
+  /**
+   * Speed paid but not yet announced, per player.
+   *
+   * Movement arrives at the client's input rate and each accepted input can
+   * pay a few whole steps; announcing every one would be a message per input.
+   * They are batched here and sent once per tick instead - and a batch only
+   * ever holds ONE per-step rate, so it can always be printed as exactly
+   * `steps x perStep`.
+   */
+  private readonly speedAwards = new Map<
+    string,
+    { steps: number; jumpSteps: number; perStep: number; total: number }
+  >();
 
   /**
    * Bloxity account id per session, for Bux fulfilment.
@@ -274,6 +289,7 @@ export class CourseRoom extends Room<CourseState> {
     this.state.players.delete(client.sessionId);
     this.movement.forget(client.sessionId);
     this.speeds.forget(client.sessionId);
+    this.speedAwards.delete(client.sessionId);
     this.stages.forget(client.sessionId);
     this.bloxityIds.delete(client.sessionId);
     this.upgrades.forget(client.sessionId);
@@ -313,6 +329,7 @@ export class CourseRoom extends Room<CourseState> {
     }
 
     const gain = this.speeds.credit(client.sessionId, player, this.movement.lastStep);
+    if (gain.steps > 0) this.queueSpeedAward(client, gain, player.totalSpeed);
     player.animation = resolveAnimation(player);
 
     // A level-up is the OTHER moment an evolution threshold can be crossed
@@ -321,6 +338,46 @@ export class CourseRoom extends Room<CourseState> {
     // twenty inputs a second that change nothing - costs one comparison
     // rather than a walk of the roster.
     if (gain.levelsGained > 0) this.checkEvolution(client, player);
+  }
+
+  /**
+   * Add a payment to this player's pending announcement.
+   *
+   * If the per-step rate has changed since the batch began - a pad claimed, a
+   * trail equipped, a belt stepped onto - the old batch is sent first, so no
+   * announcement ever averages two rates into a figure nobody was paid.
+   */
+  private queueSpeedAward(
+    client: Client,
+    gain: { steps: number; jumpSteps: number; perStep: number },
+    total: number,
+  ): void {
+    const pending = this.speedAwards.get(client.sessionId);
+    if (pending && pending.perStep !== gain.perStep) this.sendSpeedAward(client);
+    const batch = this.speedAwards.get(client.sessionId) ?? {
+      steps: 0,
+      jumpSteps: 0,
+      perStep: gain.perStep,
+      total,
+    };
+    batch.steps += gain.steps;
+    batch.jumpSteps += gain.jumpSteps;
+    batch.total = total;
+    this.speedAwards.set(client.sessionId, batch);
+  }
+
+  /** Announce whatever this player has been paid since the last send. */
+  private sendSpeedAward(client: Client): void {
+    const batch = this.speedAwards.get(client.sessionId);
+    if (!batch) return;
+    this.speedAwards.delete(client.sessionId);
+    const message: SpeedAwardedMessage = {
+      steps: batch.steps,
+      jumpSteps: batch.jumpSteps,
+      perStep: batch.perStep,
+      total: batch.total,
+    };
+    client.send(MessageType.SpeedAwarded, message);
   }
 
   /** A stage claim. The server validates it against its own transform. */
@@ -590,6 +647,11 @@ export class CourseRoom extends Room<CourseState> {
     this.state.elapsed += delta;
     const time = this.state.elapsed;
 
+    // Announce the Speed paid since the last tick, one message per player.
+    if (this.speedAwards.size > 0) {
+      for (const client of this.clients) this.sendSpeedAward(client);
+    }
+
     // The guardians CHASE, so they cannot be pure functions of time. The
     // server moves them from the authoritative positions it already has, and
     // the trample below is decided against those same positions.
@@ -697,6 +759,9 @@ export class CourseRoom extends Room<CourseState> {
       SPAWN_POSITION.z,
       SPAWN_ROTATION_Y,
     );
+    // What was earned on the way to this placement is announced before the
+    // baseline goes, so the last steps of a run still get their popup.
+    this.sendSpeedAward(client);
     this.speeds.reset(client.sessionId, player);
     player.animation = MountAnimationState.Idle;
     // A death plays the fall-over. Arriving, banking a stage and being reborn are

@@ -58,6 +58,16 @@ export const MessageType = {
   /** Server -> client: a stage reward was granted. Drives the celebration. */
   StageAwarded: 'stageAwarded',
   /**
+   * Server -> client: Speed the server just PAID this player.
+   *
+   * The only source of the "+N" popups. The client used to infer them by
+   * diffing the replicated total between patches and releasing whatever had
+   * piled up on a timer, which turned a constant per-step rate into "+14",
+   * "+15", "+17", "+8" - figures that depended on frame timing, not on what
+   * the player had earned.
+   */
+  SpeedAwarded: 'speedAwarded',
+  /**
    * Client -> server: "rebirth me".
    *
    * Carries nothing: the server already knows the player's level and rebirth

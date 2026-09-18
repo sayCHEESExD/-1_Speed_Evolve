@@ -42,7 +42,7 @@ export const COURSE_FORWARD_AXIS = 'z' as const;
  * the open ground the camp exists to provide, with both in shot and the cut
  * trail out of the valley straight ahead.
  */
-export const SPAWN_POSITION: Readonly<Vec3> = { x: 0, y: 0, z: -88 };
+export const SPAWN_POSITION: Readonly<Vec3> = { x: 0, y: 0, z: -108 };
 
 /** Spawn yaw in radians (facing +Z, down the course). */
 export const SPAWN_ROTATION_Y = 0;

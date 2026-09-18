@@ -10,17 +10,20 @@ import { COURSE } from './metrics.js';
  * four things arranged around its edge, each with its own footprint and its
  * own clear approach:
  *
- *      z -172  ┌──────── the ancient wall: three LEADERBOARDS ────────┐
- *              │                                                     │
- *              │   treadmills          open green         TRADERS    │
- *              │   ┌──────────┐                        ┌──────────┐  │
- *              │   │ 6 belts  │                        │ 3 stalls │  │
- *              │   │ on a     │          SPAWN         └──────────┘  │
- *              │   │ plank    │         (0, -88)       ┌──────────┐  │
- *              │   │ deck     │                        │ 12 PADS  │  │
- *              │   └──────────┘                        │ two tiers│  │
- *              │                                       └──────────┘  │
- *      z    0  └──────────── the cut trail, and stage 1 ─────────────┘
+ *      z -224  ┌───────── the ancient wall: three LEADERBOARDS ─────────┐
+ *              │                                                        │
+ *              │                                         ┌──────────┐   │
+ *              │   treadmills                            │ 12 PADS  │   │
+ *              │   ┌──────────┐        open green        │ two tiers│   │
+ *              │   │ 6 belts  │                          │ on a     │   │
+ *              │   │ on a     │          SPAWN           │ terrace  │   │
+ *              │   │ plank    │        (0, -108)         └──────────┘   │
+ *              │   │ deck     │                                         │
+ *              │   └──────────┘            ┌──gate──┐  ▣ TRADERS ▣  ▣   │
+ *      z    0  └─────────────────── the cut trail, and stage 1 ─────────┘
+ *
+ * Top-down, back wall at the top: +X is on the drawing's RIGHT, which is the
+ * player's LEFT, because they face down the drawing toward the gate.
  *
  * The middle stays EMPTY. Everything functional is out at the sides where it
  * can be seen whole, the player spawns in the open with a clear sightline to
@@ -69,23 +72,32 @@ export const UPGRADE_ROW: {
   readonly terraceMaxX: number;
   readonly claimRadius: number;
 } = {
-  frontX: 38,
-  backX: 60,
-  firstZ: -120,
+  /*
+   * OUT toward the wall and BACK from the gate.
+   *
+   * Out, so the open middle between the bank and the treadmill deck is wider.
+   * Back, so the bank's front stair ends thirty units short of the traders'
+   * counters: the traders now stand across the front of the camp on this
+   * side, and a bank that ran all the way forward would put a staircase in
+   * their customers' way and the traders in front of the bank's end plates.
+   */
+  frontX: 48,
+  backX: 70,
+  firstZ: -164,
   spacingZ: 16,
   perRow: UPGRADE_COUNT / 2,
   size: 9,
   height: 0.45,
   terraceY: 7,
-  terraceMinX: 50,
+  terraceMinX: 60,
   /**
-   * Stops SHORT of the camp's side wall, which begins at 69.
+   * Well short of the camp's side wall, which begins at 117.
    *
-   * A terrace that ended at 70 put a unit of itself inside the wall and left
-   * their two undersides coplanar - a hundred square units of duplicate
-   * surface for a unit of width nobody can stand on.
+   * The band between them is the jungle's. A terrace that once ran into the
+   * wall left their two undersides coplanar - a hundred square units of
+   * duplicate surface for a unit of width nobody could stand on.
    */
-  terraceMaxX: 68,
+  terraceMaxX: 78,
   /**
    * How close the mount must be to equip.
    *
@@ -293,43 +305,57 @@ export interface ShopStall {
 /**
  * Where the traders have pitched, and how far their prompt reaches.
  *
- * In a row down the FRONT of the camp - see `SHOP_ROW.x` for why there and
- * nowhere else.
+ * In a row ACROSS the front of the camp, beside the gate - see `SHOP_ROW.z`.
  */
 export const SHOP_ROW: {
-  readonly x: number;
-  readonly firstZ: number;
-  readonly spacingZ: number;
+  /** The row's line, and the X of its first stall; the stalls step along +X. */
+  readonly z: number;
+  readonly firstX: number;
+  readonly spacingX: number;
+  /**
+   * The way every counter faces, as a unit vector on the ground.
+   *
+   * THE single fact about orientation. The collision box, the prompt and
+   * every mesh in `ShopStalls` are placed from it, so moving the row cannot
+   * leave a hut facing one way and its counter another - which has happened
+   * twice already.
+   */
+  readonly faceX: number;
+  readonly faceZ: number;
+  /** A stall's length along the row. */
   readonly width: number;
+  /** A stall's depth, front to back. */
   readonly depth: number;
   readonly height: number;
-  /** Which way along X the counter faces. +1 is toward the camp's middle. */
-  readonly facing: 1 | -1;
   readonly promptRadius: number;
 } = {
   /*
-   * THE FRONT OF THE CAMP, on the player's right.
+   * ACROSS THE FRONT, beside the gate: [ TRADERS ] [ GATE ], on the player's
+   * left as they face the way out.
    *
-   * They used to stand at the far back of the player's LEFT, behind the whole
-   * length of the upgrade bank: the last thing in the camp you reached, tucked
-   * into the corner furthest from the spawn, sixteen units apart. Now they run
-   * down the open ground between the spawn and the gate, so a player leaving
-   * for a run passes all three, and they stand TWENTY-FOUR apart instead of
-   * sixteen.
+   * They have stood in three wrong places. Across the middle of the clearing,
+   * in front of the leaderboards; in the far back corner behind the upgrade
+   * bank, where nobody reached them; and last, in a column down the open
+   * ground just inboard of the treadmill deck - which put three huts between
+   * the spawn and the machines, blocking both the view of the treadmills and
+   * the ride to them.
    *
-   * The left is the upgrade bank's whole depth and the far right is the
-   * treadmill deck's, so this strip - inboard of the deck, in front of it - is
-   * the one piece of the camp with room for three huts and a clear approach to
-   * each. They face +X, back across the open middle, because that is the only
-   * direction anybody comes from.
+   * The front is the one strip neither side zone uses: the treadmills are on
+   * the other side of the gate, and the upgrade bank now ends thirty units
+   * behind this row. Every run leaves through here, so every player passes
+   * all three traders without any of them standing in the way of anything.
+   * TWENTY-SIX apart for a thirteen-long hut, so there is a whole hut's length
+   * of open ground between any two.
+   *
+   * They face -Z, back into the camp, because that is where everybody comes
+   * from; the ground behind them is the camp's front edge.
    */
-  x: -24,
-  firstZ: -70,
-  spacingZ: 24,
-  facing: 1,
-  /** Along Z, because the counter faces -X. */
+  z: -24,
+  firstX: 46,
+  spacingX: 26,
+  faceX: 0,
+  faceZ: -1,
   width: 13,
-  /** Along X. */
   depth: 5,
   /** Counter top, under one step height so a mount can ride right up to it. */
   height: 0.85,
@@ -348,22 +374,32 @@ export const SHOP_ROW: {
 };
 
 export const SHOPS: readonly ShopStall[] = [
-  { id: 'trail', title: 'Trail Trader', x: SHOP_ROW.x, z: SHOP_ROW.firstZ, color: 0xf25a9e },
+  { id: 'trail', title: 'Trail Trader', x: SHOP_ROW.firstX, z: SHOP_ROW.z, color: 0xf25a9e },
   {
     id: 'aura',
     title: 'Aura Trader',
-    x: SHOP_ROW.x,
-    z: SHOP_ROW.firstZ + SHOP_ROW.spacingZ,
+    x: SHOP_ROW.firstX + SHOP_ROW.spacingX,
+    z: SHOP_ROW.z,
     color: 0x3aa8ff,
   },
   {
     id: 'item',
     title: 'Relic Trader',
-    x: SHOP_ROW.x,
-    z: SHOP_ROW.firstZ + SHOP_ROW.spacingZ * 2,
+    x: SHOP_ROW.firstX + SHOP_ROW.spacingX * 2,
+    z: SHOP_ROW.z,
     color: 0xf2a53a,
   },
 ];
+
+/**
+ * A stall's footprint in WORLD axes.
+ *
+ * `width` runs along the row and `depth` runs front to back, so which of the
+ * two lies along X depends on which way the counter faces.
+ */
+const SHOP_ALONG_X = Math.abs(SHOP_ROW.faceZ) > Math.abs(SHOP_ROW.faceX);
+export const SHOP_SIZE_X = SHOP_ALONG_X ? SHOP_ROW.width : SHOP_ROW.depth;
+export const SHOP_SIZE_Z = SHOP_ALONG_X ? SHOP_ROW.depth : SHOP_ROW.width;
 
 /**
  * The stall a player is close enough to use, or null.
@@ -608,8 +644,19 @@ const buildTrainingDeck = (stage: number): void => {
 /** Three market stalls and their counters. */
 const buildTraders = (stage: number): void => {
   for (const shop of SHOPS) {
-    box(stage, 'shop', shop.x, SHOP_ROW.height, shop.z, SHOP_ROW.depth, SHOP_ROW.width, 2.4);
+    box(stage, 'shop', shop.x, SHOP_ROW.height, shop.z, SHOP_SIZE_X, SHOP_SIZE_Z, 2.4);
   }
+};
+
+/** Half the width of the open middle, which nothing is ever planted in. */
+const MIDDLE_HALF_WIDTH = 30;
+
+/** The traders' row as one rectangle, huts included. */
+const SHOP_BOUNDS = {
+  minX: Math.min(...SHOPS.map((shop) => shop.x)) - SHOP_SIZE_X / 2,
+  maxX: Math.max(...SHOPS.map((shop) => shop.x)) + SHOP_SIZE_X / 2,
+  minZ: Math.min(...SHOPS.map((shop) => shop.z)) - SHOP_SIZE_Z / 2,
+  maxZ: Math.max(...SHOPS.map((shop) => shop.z)) + SHOP_SIZE_Z / 2,
 };
 
 /**
@@ -639,23 +686,27 @@ const isReserved = (x: number, z: number): boolean => {
     z > UPGRADE_FIRST_Z - TERRACE_OVERHANG - approach &&
     z < UPGRADE_LAST_Z + TERRACE_OVERHANG + approach;
 
+  // The deck, and ALL the ground between it and the open middle: the
+  // treadmills are ridden onto from the camp side, so that whole face is their
+  // approach rather than a seven-unit margin.
   const right =
     x > TRAINING.minX - approach &&
-    x < TRAINING.maxX + approach &&
+    x < -MIDDLE_HALF_WIDTH &&
     z > TRAINING.minZ - approach &&
     z < TRAINING.maxZ + approach;
 
-  // And the traders' strip down the front, plus the ground in front of it a
-  // player rides up through.
+  // The traders' row, and the ground IN FRONT of it that customers ride up
+  // through - a lane the length of a hut, on the side the counters face.
+  const lane = 18;
   const traders =
-    x > SHOP_ROW.x - SHOP_ROW.depth - approach &&
-    x < SHOP_ROW.x + SHOP_ROW.depth + approach + 8 &&
-    z > SHOP_ROW.firstZ - SHOP_ROW.width &&
-    z < SHOP_ROW.firstZ + SHOP_ROW.spacingZ * 2 + SHOP_ROW.width;
+    x > SHOP_BOUNDS.minX - approach + Math.min(0, SHOP_ROW.faceX * lane) &&
+    x < SHOP_BOUNDS.maxX + approach + Math.max(0, SHOP_ROW.faceX * lane) &&
+    z > SHOP_BOUNDS.minZ - approach + Math.min(0, SHOP_ROW.faceZ * lane) &&
+    z < SHOP_BOUNDS.maxZ + approach + Math.max(0, SHOP_ROW.faceZ * lane);
 
   // The open middle, and the strip of it the camera lives in. A prop here is a
   // prop every player steers round for ever, or one the camera looks through.
-  const middle = Math.abs(x) < 26;
+  const middle = Math.abs(x) < MIDDLE_HALF_WIDTH;
 
   // And the gateway, which must stay a clear run from the spawn.
   const gate = Math.abs(x) < 34 && z > -30;
@@ -684,7 +735,7 @@ const dressCamp = (stage: number): void => {
    */
   const inner = COURSE.campHalfWidth - 20;
   const outer = COURSE.campHalfWidth - 8;
-  for (let i = 0; i < 54; i += 1) {
+  for (let i = 0; i < 70; i += 1) {
     const r = rand(i * 31 + 7);
     const r2 = rand(i * 57 + 19);
     const along = COURSE.campStartZ + 6 + r * (COURSE.campEndZ - COURSE.campStartZ - 10);
@@ -705,7 +756,7 @@ const dressCamp = (stage: number): void => {
   }
 
   // Undergrowth in front of the treeline, thinning toward the open ground.
-  for (let i = 0; i < 46; i += 1) {
+  for (let i = 0; i < 60; i += 1) {
     const r = rand(i * 71 + 13);
     const r2 = rand(i * 43 + 29);
     const along = COURSE.campStartZ + 10 + r * (COURSE.campEndZ - COURSE.campStartZ - 18);
@@ -718,7 +769,7 @@ const dressCamp = (stage: number): void => {
 
   // Vines down the ancient wall, which is what stops seventy metres of ruin
   // reading as a painted backdrop.
-  for (let i = 0; i < 10; i += 1) {
+  for (let i = 0; i < 14; i += 1) {
     const r = rand(i * 53 + 11);
     const side = i % 2 === 0 ? 1 : -1;
     const along = COURSE.campStartZ + 14 + r * (COURSE.campEndZ - COURSE.campStartZ - 28);
@@ -735,19 +786,21 @@ const dressCamp = (stage: number): void => {
   }
 
   /*
-   * The expedition's own camp: FOUR pieces, in the two corners nothing else
-   * uses.
+   * The expedition's own camp: FOUR pieces, in the two BACK corners.
    *
    * Four rather than the dozen that used to be here. A camp is legible from a
    * tent and a stack of crates; a dozen of them is a warehouse, and every one
    * of them was something to steer round on the way to somewhere else.
+   *
+   * Both at the back now. The front belongs to the gate and the traders, and a
+   * tent in the front corner was standing exactly where the third hut is.
    */
   const backCorner = COURSE.campStartZ + 22;
-  const frontCorner = -26;
-  decorate(stage, 'tent', -80, COURSE.floorY, backCorner, 1.6, 0.35, 0);
-  decorate(stage, 'crates', -76, COURSE.floorY, backCorner + 12, 1.2, -0.2, 0);
-  decorate(stage, 'tent', 80, COURSE.floorY, frontCorner, 1.4, -0.35, 2);
-  decorate(stage, 'crates', 75, COURSE.floorY, frontCorner - 10, 1.1, 0.25, 1);
+  const corner = COURSE.campHalfWidth - 24;
+  decorate(stage, 'tent', -corner, COURSE.floorY, backCorner, 1.6, 0.35, 0);
+  decorate(stage, 'crates', -corner + 6, COURSE.floorY, backCorner + 12, 1.2, -0.2, 0);
+  decorate(stage, 'tent', corner, COURSE.floorY, backCorner + 2, 1.4, -0.35, 2);
+  decorate(stage, 'crates', corner - 6, COURSE.floorY, backCorner + 14, 1.1, 0.25, 1);
 
   // Two overgrown guardians flanking the way out, set well back from the
   // trail's own width so the gap between them is the gate rather than an
@@ -762,7 +815,7 @@ const dressCamp = (stage: number): void => {
   // nobody can read the bottom row of.
   for (let i = 0; i < 10; i += 1) {
     const r = rand(i * 97 + 3);
-    const x = -80 + i * 18;
+    const x = -(COURSE.campHalfWidth - 16) + i * ((COURSE.campHalfWidth - 16) * 2) / 9;
     if (BOARDS.some((board) => Math.abs(x - board.x) < BOARD_ROW.width * 0.7)) continue;
     if (isReserved(x, COURSE.campStartZ + 10)) continue;
     decorate(stage, 'rock', x, COURSE.floorY, COURSE.campStartZ + 10, 0.9 + r * 0.7, r * 6.2, i % 2);
@@ -772,7 +825,7 @@ const dressCamp = (stage: number): void => {
 /**
  * The cut trail out of the camp, and the gateway the expedition leaves by.
  *
- * It narrows deliberately: the clearing is a hundred and fifty wide and the
+ * It narrows deliberately: the clearing is two hundred and fifty wide and the
  * trail is thirty, so the way on is obvious without a single arrow. The
  * environment is the signpost, which is the rule the whole course is laid out
  * under.
